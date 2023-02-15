@@ -1,134 +1,149 @@
-# Motivation
+# Bonding tokens directly on-chain
 
-Blockstream has a mining derivatives marketplace where users can buy the rights to hashing power to mine Bitcoins over a certain period defined in the contract.
+*The staking token is the primary capital asset on any POS blockchain. We hope that creating more options for what users can do with their staked tokens will increase the economic activities facilitated by the blockchain.*
 
-When a user buys a [BMN(Blockstream Mining Note)](https://blockstream.com/finance/bmn/), Bitcoin hashing power (measured in TH/s) gets allocated to the user, and mining rewards streams to an escrow account that releases the funds to the BMN holder after the expiration date defined in the contract.
+Chains created with the Cosmos-SDK usually have an un-bonding period or time for bonded tokens to become available after a withdrawal request from the network, which can range from 7 - 28 days, leading to a couple of issues for delegators.
 
-Meanwhile, BMN can still be traded in a secondary market for users who need liquidity before the expiration date stated on the mining contract.
+1. Bonding tokens directly to the network, means the only yield-bearing option available to delegators comes from protocol inflation or fees generated from network activities.
 
-&nbsp;
-
-### Benefits to miners
-
-* BMN allows miners to generate liquidity in exchange for hashing power they control, thereby bringing liquidity to the otherwise illiquid but cashflow-rich mining business.
-* BMN lowers the barrier to entry into the mining business by allowing investors to buy BMN representing mining hash rate.
+2. It is not possible to transfer bonded tokens to another address without first un-bonding them.
 
 &nbsp;
 
-## Managing staked assets directly on-chain
+## SudoStake Liquidity Vaults
 
-Cosmos-SDK base blockchains usually have an un-bonding period(or time it takes for bonded tokens to become available after a withdrawal request to a validator) ranging from 7 - 28 days, which leads to a couple of issues for delegators.
+Vaults are instances of a smart-contract that manages staked tokens on behalf of its owner, the benefits that come from doing this are as follows;
 
-* Limited Defi use cases (because bonding directly to the network means the only viable yield-bearing option is staking rewards).
-* Currently, it's not possible to transfer bonded assets to another address without first un-bonding them.
+* Instant transfer of vault ownership to another owner/entity.
+* Vault owners can choose to open liquidity request options (more on this in a bit).
+* Ability to create multiple vaults for managing different asset groups.
+* The flexibility of vault-based asset management encourages more assets to be bonded to the network, which increases the overall network security.
 
 &nbsp;
 
-## Vault-based alternative to liquid-staking
+## Liquidity Request Options (LROs)
 
-Vaults are instances of a smart-contract that manages staked assets on behalf of its owner, the benefits from doing this are as follows;
+Once staked assets can be managed through a vault, it creates more opportunities for using this same asset already bonded to the network in other Defi use cases such as;
 
-* Vaults can be transfered instantly to another owner/entity
-* Vaults containing assets can be used as collateral to borrow USDC in a p2p marketplace
-* A vault owner can offer staking deals in exchange for upfront liquidity
-* Users can create multiple vaults with different presets for managing different asset groups.
-* The flexibility vault-based asset management provides, encourages more assets to be bonded to the network, which increases the over-all security of the network.
+* Fixed-term rewards claims
+* Fixed-interest rewards claims
+* Fixed-term Loans
+* Hybrid option(Combines FixedTermRewardsClaim && FixedTermLoan)
 
 &nbsp;
 
 ## Contracts specification
 
-The protocol defines two primary smart contracts for managing these interactions.
+The protocol defines 3 primary smart contracts for managing these interactions.
 
 &nbsp;
 
-### VAULTS_MANAGER_CONTRACT
+### ACCOUNTS_MANAGER_CONTRACT
 
-<details>
-<summary>State: vaults_list</summary>
+The accounts manager contract allow users to create and keep track of all instances of the
+VAULT_CONTRACT and LP_GROUP_CONTRACT
 
-<pre>
-[
-    {
-        vault_id,
-        vault_c_addres,
-        owner_adddress
-    },
-    ...
-]
-</pre>
-</details>
+---
 
-#### `fn: mint`
+#### `fn: create_vault`
 
-Create a new vault by calling the instantiate method of the VAULT_CONTRACT, which returns a contract address, that is then associated with the `msg.sender`.
+Creates a new vault by calling the instantiate method of the VAULT_CONTRACT, which returns a contract address, that is then associated with the `msg.sender`.
 
-#### `fn: transfer`
+#### `fn: create_lp_group`
 
-Allow a vault owner to transfer ownership to another user.
-
-#### `fn: list_for_sale`
-
-A vault owner can list their vault for sale for a fixed price.
+Creates a new liquidity providers group (LP_GROUP) by calling the instantiate method of the LP_GROUP_CONTRACT, which returns a contract address, that is then associated with the `msg.sender`.
 
 &nbsp;
 
 ### VAULT_CONTRACT
 
-<details>
-<summary>State: vault_preferences</summary>
+A vault is a smart contract account that allow users to manage their staked assets, as well as giving them the options to use same assets in Defi.
 
-<pre>
-{
-    // Only vaults_manager_contract can update the owner's address
-    vault_manager_address,
-    owner:{
-        address,
-        actions_scope: [delegate, undelegate, redelegate, claim_rewards, withdraw_funds]
-        is_active,
-    }
-    controller: {
-        address,
-        actions_scope: [claim_rewards, withdraw_funds],
-        expiration_date
-        percentage_stake_to_undelegate_at_liquidation
-        is_active
-    }
-}
-</pre>
-</details>
+---
 
 #### `fn: delegate`
 
-Allow the vault owner to stake the assets to a validator.
+Allows the vault owner to stake the assets to a validator.
 
 #### `fn: undelegate`
 
-Allow the vault owner to un-stake the assets.
+Allows the vault owner to un-stake the assets from a validator.
 
 #### `fn: redelegate`
 
-Allow the vault owner to redelegate their stake to another validator.
+Allows the vault owner to redelegate their stake to another validator.
+
+#### `fn: open_LRO`
+
+Allows the vault owner to open a liquidity request option
+
+#### `fn: close_LRO`
+
+Allows the vault owner to close a liquidity request option before the offer is accepted by other market participants.
+
+#### `fn: accept_LRO`
+
+Allows a liquidity provider (which could be an individual or an LP_GROUP) to accept a liquidity request option.
+
+#### `fn: process_LRO_claims`
+
+Allows the vault owner/controller to process LRO claims.
+
+#### `fn: claim_delegator_rewards`
+
+Allows the vault owner to claim delegator rewards when there is no active LRO
 
 #### `fn: withdraw_funds`
 
-Allow the vault owner/controller to withdraw assets held in the vault based on allowance.
+Allows the vault owner/controller to withdraw assets held in the vault based on allowance.
 
-#### `fn: claim_rewards`
+#### `fn: transfer`
 
-Allow the vault owner/controller to claim staking rewards.
+Allows a vault owner to transfer ownership to another user.
 
-#### `fn: change_vault_owner`
+&nbsp;
 
-Allow the associated vaults_manager_contract to change a vault's owner.
+### LP_GROUP_CONTRACT
 
-#### `fn: create_deal`
+A liquidity providers group (or LP_GROUP for short), allows liquidity providers to pool their resources together to fund LROs, where interest generated from accepted LROs is split proportionally amongst invested members of the group upon maturity.
 
-Allow the vault owner to create a deal that other users can see
+---
 
-#### `fn: accept_deal`
+#### `fn: join_group`
 
-Allow a user to accept a deal created by the vault owner
+Allows users to join a liquidity providers group.
+
+#### `fn: subscribe_to_LRO_pool`
+
+Allows group members to subscribe to a LRO funding pool by contributing a portion of the requested liquidity, once the requested amount is filled, the LRO is automatically subscribed to on behalf of the group members that contributed to the  LRO funding pool.
+
+#### `fn: unsubscribe_from_LRO_pool`
+
+Allows group members to unsubscribe from a LRO, by withrawing their contribution from a LRO funding pool before the LRO is accepted.
+
+#### `fn: process_LRO_pool`
+
+Allows any member of an active LRO funding pool, to trigger the underlying vault, to carry out actions such as claim_rewards, begin_liquidation, finalize_contract
+
+#### `fn: process_LRO_pool_hook`
+
+Allows the LP_GROUP to listen to events emitted by the underlying vaults after process_LRO_claims is called on an active vault funded by the group members.
+
+Events emitted:
+[claim_rewards, begin_liquidation, finalized_claim]
+
+#### `fn: claim_rewards_from_LRO_pool`
+
+Allows group members who are subscribed to a LRO pool to claim their share of the returns from the pool account after finalized_claim event is emitted by the underlying vault.
+
+#### `fn: leave_group`
+
+Allows a user to leave a liquidity providers group.
+
+&nbsp;
+
+## Protocol fees
+0.3% fee charged to vault owners on requested liquidity.
 
 &nbsp;
 
@@ -138,6 +153,9 @@ TBA
 
 &nbsp;
 
-## Market Places
+## Frontend implementation
 
-Anyone can create frontends/marketplaces that allow users to interact with vaults on supported blockchains.
+* Dashboard for managing vaults
+* Dashboard for managing LP_GROUPS
+* Marketplace for trading LROs
+

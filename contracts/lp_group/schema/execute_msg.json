@@ -1,0 +1,97 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ExecuteMsg",
+  "oneOf": [
+    {
+      "description": "Allows users to join a liquidity providers group.",
+      "type": "object",
+      "required": [
+        "join_group"
+      ],
+      "properties": {
+        "join_group": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Allows group members to subscribe to a LRO funding pool by contributing a portion of the requested liquidity, once the requested amount is filled, the LRO is automatically subscribed to on behalf of the group members that contributed to the  LRO funding pool.",
+      "type": "object",
+      "required": [
+        "subscribe_to_l_r_o_pool"
+      ],
+      "properties": {
+        "subscribe_to_l_r_o_pool": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Allows group members to unsubscribe from a LRO, by withrawing their contribution from a LRO funding pool before the LRO is accepted.",
+      "type": "object",
+      "required": [
+        "unsubscribe_from_l_r_o_pool"
+      ],
+      "properties": {
+        "unsubscribe_from_l_r_o_pool": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Allows any member of an active LRO funding pool, to trigger the underlying vault, to carry out actions such as claim_rewards, begin_liquidation, finalize_contract",
+      "type": "object",
+      "required": [
+        "process_l_r_o_pool"
+      ],
+      "properties": {
+        "process_l_r_o_pool": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Allows the LP_GROUP to listen to events emitted by the underlying vaults after process_LRO_claims is called on an active vault funded by the group members.\n\nEvents emitted from vault:",
+      "type": "object",
+      "required": [
+        "process_l_r_o_pool_hook"
+      ],
+      "properties": {
+        "process_l_r_o_pool_hook": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Allows group members who are subscribed to a LRO pool to claim their share of the returns from the pool account after finalized_claim event is emitted by the underlying vault.",
+      "type": "object",
+      "required": [
+        "claim_rewards_from_l_r_o_pool"
+      ],
+      "properties": {
+        "claim_rewards_from_l_r_o_pool": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Allows a user to leave liquidity providers group.",
+      "type": "object",
+      "required": [
+        "leave_group"
+      ],
+      "properties": {
+        "leave_group": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    }
+  ]
+}
