@@ -1,11 +1,31 @@
-use cosmwasm_std::Uint128;
-use cw20::Denom;
+use cosmwasm_std::{Coin, Uint128};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InstantiateMsg {
-    pub native_denom: Denom,
+    pub staking_denom: String,
+    pub owner_address: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LiquidityRequestOption {
+    FixedTermRewardsClaim {
+        requested_liquidity: Coin,
+        duration_in_days: u32,
+    },
+    FixedInterestRewardsClaim {
+        requested_liquidity: Coin,
+        claimable_tokens: Coin,
+    },
+    FixedTermLoan {
+        requested_liquidity: Coin,
+        to_pay_back: Coin,
+        duration_in_days: u32,
+        token_amount_to_liquidate_on_default: Coin,
+        can_claim_staking_rewards: bool,
+    },
 }
 
 /**
@@ -33,48 +53,48 @@ pub enum ExecuteMsg {
         amount: Uint128,
     },
 
-    /// Allows the vault owner to open a liquidity request option
-    OpenLRO {
-        // todo
-    },
-
-    /// Allows the vault owner to close a liquidity request option
-    /// before the offer is accepted by other market participants.
-    CloseLRO {
-        // todo
-    },
-
-    /// Allows a liquidity provider (which could be an individual or an LP_GROUP)
-    /// to accept a liquidity request option.
-    AcceptLRO {
-        // todo
-    },
-
-    /// Allows the vault owner/controller to process LRO claims.
-    ProcessLROClaims {
-        // todo
-    },
-
     // Allows the vault owner to claim delegator rewards when there is no active LRO
     ClaimDelegatorRewards {
         withdraw: Option<bool>,
     },
 
+    /// Allows the vault owner to open a liquidity request option
+    OpenLRO {
+        option: LiquidityRequestOption,
+    },
+
+    /// Allows the vault owner to close a liquidity request option
+    /// before the offer is accepted by other market participants.
+    ClosePendingLRO {},
+
+    /// Allows a liquidity provider (which could be an individual or an LP_GROUP contract)
+    /// to accept a liquidity request option.
+    AcceptLRO {
+        is_contract_user: Option<bool>,
+    },
+
+    /// Allows the vault owner/controller to process LRO claims.
+    ProcessClaimsForLRO {},
+
     /// Allows the vault owner/controller to
     /// withdraw assets held in the vault based on allowance.
-    WithdrawFunds {
-        // todo
+    Withdraw {
+        to_address: Option<String>,
+        funds: Coin,
     },
 
     /// Allows a vault owner to transfer ownership to another user.
     Transfer {
-        // todo
+        to_address: String,
     },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum QueryMsg {}
+pub enum QueryMsg {
+    /// Returns information about the current state of the vault
+    Info {},
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InfoResponse {}
