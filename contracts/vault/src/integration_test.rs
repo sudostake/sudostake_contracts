@@ -5,7 +5,7 @@ mod tests {
     use cw_multi_test::{App, AppBuilder, Contract, ContractWrapper, Executor};
 
     const USER: &str = "user";
-    const NATIVE_DENOM: &str = "udenom";
+    const STAKING_DENOM: &str = "udenom";
     const IBC_DENOM_1: &str = "ibc/usdc_denom";
     const SUPPLY: u128 = 500_000_000u128;
 
@@ -18,7 +18,7 @@ mod tests {
                     &Addr::unchecked(USER),
                     vec![
                         Coin {
-                            denom: NATIVE_DENOM.to_string(),
+                            denom: STAKING_DENOM.to_string(),
                             amount: Uint128::from(SUPPLY),
                         },
                         Coin {
@@ -43,7 +43,7 @@ mod tests {
         let template_id = app.store_code(contract_template());
 
         let msg = InstantiateMsg {
-            staking_denom: NATIVE_DENOM.to_string(),
+            staking_denom: STAKING_DENOM.to_string(),
             owner_address: USER.to_string(),
         };
 
