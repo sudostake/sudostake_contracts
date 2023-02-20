@@ -10,16 +10,18 @@ dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
  "cosmwasm-storage",
- "cw-multi-test 0.14.0",
- "cw-storage-plus 0.14.0",
- "cw-utils 0.14.0",
+ "cw-multi-test 0.16.2",
+ "cw-storage-plus 1.0.1",
+ "cw-utils 1.0.1",
  "cw0",
- "cw2 0.14.0",
- "cw20 0.14.0",
- "protobuf 2.28.0",
+ "cw2 1.0.1",
+ "cw20 1.0.1",
+ "lp_group_contract",
+ "protobuf 3.2.0",
  "schemars",
  "serde",
  "thiserror",
+ "vault_contract",
 ]
 
 [[package]]
@@ -615,14 +617,16 @@ dependencies = [
  "protobuf 3.2.0",
  "schemars",
  "serde",
+ "shared_types",
  "thiserror",
+ "vault_contract",
 ]
 
 [[package]]
 name = "once_cell"
-version = "1.17.0"
+version = "1.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f61fba1741ea2b3d6a1e3178721804bb716a68a6aeba1149b5d52e3d464ea66"
+checksum = "b7e5500299e16ebb147ae15a00a942af264cf3688f47923b8fc2cd5858f23ad3"
 
 [[package]]
 name = "opaque-debug"
@@ -829,9 +833,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.92"
+version = "1.0.93"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7434af0dc1cbd59268aa98b4c22c131c0584d2232f6fb166efb993e2832e896a"
+checksum = "cad406b69c91885b5107daf2c29572f6c8cdb3c66826821e286c533490c0bc76"
 dependencies = [
  "itoa",
  "ryu",
@@ -860,6 +864,14 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest 0.10.6",
+]
+
+[[package]]
+name = "shared_types"
+version = "0.1.0"
+dependencies = [
+ "schemars",
+ "serde",
 ]
 
 [[package]]
@@ -987,6 +999,7 @@ dependencies = [
  "protobuf 3.2.0",
  "schemars",
  "serde",
+ "shared_types",
  "thiserror",
 ]
 

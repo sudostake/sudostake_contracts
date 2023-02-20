@@ -1,9 +1,7 @@
 use crate::error::ContractError;
 use crate::msg::{ExecuteMsg, InfoResponse, InstantiateMsg, QueryMsg};
 use crate::state::{Config, CONFIG};
-use cosmwasm_std::{
-    entry_point, to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult,
-};
+use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult};
 
 // contract info
 pub const CONTRACT_NAME: &str = "vault_contract";
@@ -35,6 +33,12 @@ pub fn instantiate(
             owner: address,
         },
     )?;
+
+    // todo test shared types
+    shared_types::ProcessPoolHook {
+        vault_id: 8u16,
+        event: shared_types::VaultEvents::BeginLiquidation,
+    };
 
     // response
     Ok(Response::new().add_attribute("method", "instantiate"))

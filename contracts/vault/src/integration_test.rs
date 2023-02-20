@@ -45,6 +45,7 @@ mod tests {
         let msg = InstantiateMsg {
             staking_denom: STAKING_DENOM.to_string(),
             owner_address: USER.to_string(),
+            account_manager_address: USER.to_string(),
         };
 
         let template_contract_addr = app
