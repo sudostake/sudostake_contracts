@@ -1,4 +1,4 @@
-use cosmwasm_std::{Coin, Uint128};
+use cosmwasm_std::{Coin, Uint128, VoteOption};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -11,30 +11,43 @@ pub struct InstantiateMsg {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
+pub enum VotingOptions {
+    CastSimpleVote,
+    CastWeightedVote,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum LiquidityRequestOption {
     FixedTermRewardsClaim {
         requested_liquidity: Coin,
         duration_in_days: u32,
+        vote_options: Vec<VotingOptions>,
     },
     FixedInterestRewardsClaim {
         requested_liquidity: Coin,
         claimable_tokens: Coin,
+        vote_options: Vec<VotingOptions>,
     },
     FixedTermLoan {
         requested_liquidity: Coin,
         to_pay_back: Coin,
         duration_in_days: u32,
         token_amount_to_liquidate_on_default: Coin,
-        can_claim_staking_rewards: bool,
+        vote_options: Vec<VotingOptions>,
+        can_claim_rewards: bool,
     },
 }
 
-/**
- * LRO: Liquidity request option
- */
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecuteMsg {
+    /// Allows vault owner/controller to cast a simple vote
+    Vote {
+        proposal_id: u64,
+        vote: VoteOption,
+    },
+
     /// Allows the vault owner to stake the assets to a validator.
     Delegate {
         validator: String,
@@ -77,8 +90,7 @@ pub enum ExecuteMsg {
     /// Allows the vault owner/controller to process LRO claims.
     ProcessClaimsForLRO {},
 
-    /// Allows the vault owner/controller to
-    /// withdraw assets held in the vault based on allowance.
+    /// Allows the vault owner to withdraw funds from the vault.
     Withdraw {
         to_address: Option<String>,
         funds: Coin,

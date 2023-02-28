@@ -23,7 +23,7 @@ library = []
 
 [dependencies]
 cw0 = {  version = "0.10.3" }
-cosmwasm-std = "1.1.0"
+cosmwasm-std = "1.2.1"
 cosmwasm-storage = "1.0.0"
 cw-storage-plus = "1.0.1"
 cw2 = "1.0.1"
