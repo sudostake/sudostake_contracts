@@ -19,12 +19,12 @@ pub enum VotingOptions {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LiquidityRequestOption {
-    FixedTermRewardsClaim {
+    FixedTermRental {
         requested_liquidity: Coin,
         duration_in_days: u32,
         vote_options: Vec<VotingOptions>,
     },
-    FixedInterestRewardsClaim {
+    FixedInterestRental {
         requested_liquidity: Coin,
         claimable_tokens: Coin,
         vote_options: Vec<VotingOptions>,
@@ -42,12 +42,6 @@ pub enum LiquidityRequestOption {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecuteMsg {
-    /// Allows vault owner/controller to cast a simple vote
-    Vote {
-        proposal_id: u64,
-        vote: VoteOption,
-    },
-
     /// Allows the vault owner to stake the assets to a validator.
     Delegate {
         validator: String,
@@ -97,8 +91,14 @@ pub enum ExecuteMsg {
     },
 
     /// Allows a vault owner to transfer ownership to another user.
-    Transfer {
+    TransferOwnership {
         to_address: String,
+    },
+
+    /// Allows vault owner/controller to cast a simple vote
+    Vote {
+        proposal_id: u64,
+        vote: VoteOption,
     },
 }
 

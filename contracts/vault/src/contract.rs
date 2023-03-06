@@ -1,13 +1,16 @@
 use crate::error::ContractError;
-use crate::msg::{ExecuteMsg, InfoResponse, InstantiateMsg, QueryMsg};
+use crate::msg::{ExecuteMsg, InfoResponse, InstantiateMsg, LiquidityRequestOption, QueryMsg};
 use crate::state::{Config, CONFIG};
-use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult};
+use cosmwasm_std::{
+    entry_point, to_binary, Binary, Coin, Deps, DepsMut, Env, MessageInfo, Response, StdResult,
+    Uint128, VoteOption,
+};
 
 // contract info
 pub const CONTRACT_NAME: &str = "vault_contract";
 pub const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-#[cfg_attr(not(feature = "library"), entry_point)]
+#[entry_point]
 pub fn instantiate(
     deps: DepsMut,
     _env: Env,
@@ -34,28 +37,181 @@ pub fn instantiate(
         },
     )?;
 
-    // todo test shared types
-    shared_types::ProcessPoolHook {
-        vault_id: 8u16,
-        event: shared_types::VaultEvents::BeginLiquidation,
-    };
-
     // response
     Ok(Response::new().add_attribute("method", "instantiate"))
 }
 
-#[cfg_attr(not(feature = "library"), entry_point)]
+#[entry_point]
 pub fn execute(
     _deps: DepsMut,
     _env: Env,
     _info: MessageInfo,
     _msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
-    // return response
-    Ok(Response::new())
+    match _msg {
+        ExecuteMsg::Delegate { validator, amount } => {
+            execute_delegate(_deps, _env, &_info, validator, amount)
+        }
+        ExecuteMsg::Undelegate { validator, amount } => {
+            execute_undelegate(_deps, _env, &_info, validator, amount)
+        }
+        ExecuteMsg::Redelegate {
+            src_validator,
+            dst_validator,
+            amount,
+        } => execute_redelegate(_deps, _env, &_info, src_validator, dst_validator, amount),
+        ExecuteMsg::ClaimDelegatorRewards { withdraw } => {
+            execute_claim_delegator_rewards(_deps, _env, &_info, withdraw)
+        }
+        ExecuteMsg::OpenLRO { option } => execute_open_lro(_deps, _env, &_info, option),
+        ExecuteMsg::ClosePendingLRO {} => execute_close_pending_lro(_deps, _env, &_info),
+        ExecuteMsg::AcceptLRO { is_contract_user } => {
+            execute_accept_lro(_deps, _env, &_info, is_contract_user)
+        }
+        ExecuteMsg::ProcessClaimsForLRO {} => execute_process_claims_for_lro(_deps, _env, &_info),
+        ExecuteMsg::Withdraw { to_address, funds } => {
+            execute_withdraw(_deps, _env, &_info, to_address, funds)
+        }
+        ExecuteMsg::TransferOwnership { to_address } => {
+            execute_transfer_ownership(_deps, _env, &_info, to_address)
+        }
+        ExecuteMsg::Vote { proposal_id, vote } => {
+            execute_vote(_deps, _env, &_info, proposal_id, vote)
+        }
+    }
 }
 
-#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn execute_delegate(
+    deps: DepsMut,
+    env: Env,
+    info: &MessageInfo,
+    validator: String,
+    amount: Uint128,
+) -> Result<Response, ContractError> {
+    // todo
+    // verify vault owner that is calling this method
+    // verify the correct amount and denom was sent along to be staked
+    // increase the current total amount staked in the contract state
+    // create sdk_msg for staking tokens
+    // respond
+
+    Ok(Response::default())
+}
+
+pub fn execute_undelegate(
+    deps: DepsMut,
+    env: Env,
+    info: &MessageInfo,
+    validator: String,
+    amount: Uint128,
+) -> Result<Response, ContractError> {
+    // TODO implement this˝
+    // respond
+    Ok(Response::default())
+}
+
+pub fn execute_redelegate(
+    deps: DepsMut,
+    env: Env,
+    info: &MessageInfo,
+    src_validator: String,
+    dst_validator: String,
+    amount: Uint128,
+) -> Result<Response, ContractError> {
+    // TODO implement this˝
+    // respond
+    Ok(Response::default())
+}
+
+pub fn execute_claim_delegator_rewards(
+    deps: DepsMut,
+    env: Env,
+    info: &MessageInfo,
+    withdraw: Option<bool>,
+) -> Result<Response, ContractError> {
+    // TODO implement this˝
+    // respond
+    Ok(Response::default())
+}
+
+pub fn execute_open_lro(
+    deps: DepsMut,
+    env: Env,
+    info: &MessageInfo,
+    option: LiquidityRequestOption,
+) -> Result<Response, ContractError> {
+    // TODO implement this˝
+    // respond
+    Ok(Response::default())
+}
+
+pub fn execute_close_pending_lro(
+    deps: DepsMut,
+    env: Env,
+    info: &MessageInfo,
+) -> Result<Response, ContractError> {
+    // TODO implement this˝
+    // respond
+    Ok(Response::default())
+}
+
+pub fn execute_accept_lro(
+    deps: DepsMut,
+    env: Env,
+    info: &MessageInfo,
+    is_contract_user: Option<bool>,
+) -> Result<Response, ContractError> {
+    // TODO implement this˝
+    // respond
+    Ok(Response::default())
+}
+
+pub fn execute_process_claims_for_lro(
+    deps: DepsMut,
+    env: Env,
+    info: &MessageInfo,
+) -> Result<Response, ContractError> {
+    // TODO implement this˝
+    // respond
+    Ok(Response::default())
+}
+
+pub fn execute_withdraw(
+    deps: DepsMut,
+    env: Env,
+    info: &MessageInfo,
+    to_address: Option<String>,
+    funds: Coin,
+) -> Result<Response, ContractError> {
+    // TODO implement this˝
+    // respond
+    Ok(Response::default())
+}
+
+pub fn execute_transfer_ownership(
+    deps: DepsMut,
+    env: Env,
+    info: &MessageInfo,
+    to_address: String,
+) -> Result<Response, ContractError> {
+    // TODO implement this˝
+    // respond
+    Ok(Response::default())
+}
+
+pub fn execute_vote(
+    deps: DepsMut,
+    env: Env,
+    info: &MessageInfo,
+    proposal_id: u64,
+    vote: VoteOption,
+) -> Result<Response, ContractError> {
+    // TODO implement this˝
+    // respond
+    Ok(Response::default())
+}
+
+#[entry_point]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Info {} => to_binary(&query_info(deps)?),

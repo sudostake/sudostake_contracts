@@ -74,4 +74,9 @@ mod tests {
 
         assert_eq!(info, InfoResponse {});
     }
+
+    #[test]
+    fn test_delegate() {
+        // todo
+    }
 }
