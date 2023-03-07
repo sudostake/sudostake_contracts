@@ -2,8 +2,8 @@ use crate::error::ContractError;
 use crate::msg::{ExecuteMsg, InfoResponse, InstantiateMsg, LiquidityRequestOption, QueryMsg};
 use crate::state::{Config, CONFIG};
 use cosmwasm_std::{
-    entry_point, to_binary, Binary, Coin, Deps, DepsMut, Env, MessageInfo, Response, StdResult,
-    Uint128, VoteOption,
+    attr, entry_point, to_binary, Binary, Coin, Deps, DepsMut, Env, MessageInfo, Response,
+    StakingMsg, StdResult, Uint128, VoteOption,
 };
 
 // contract info
@@ -20,22 +20,14 @@ pub fn instantiate(
     // Store the contract name and version
     cw2::set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
 
-    // make sure the staking_denom is a non-empty string
-    if msg.staking_denom.is_empty() {
-        return Err(ContractError::InvalidStakingDenom {});
-    }
-
     // Validate the owner_address
-    let address = deps.api.addr_validate(&msg.owner_address)?;
+    let owner = deps.api.addr_validate(&msg.owner_address)?;
+
+    // Validate account_manager_address
+    let acc_manager = deps.api.addr_validate(&msg.account_manager_address)?;
 
     // Save contract state
-    CONFIG.save(
-        deps.storage,
-        &Config {
-            staking_denom: msg.staking_denom,
-            owner: address,
-        },
-    )?;
+    CONFIG.save(deps.storage, &Config { owner, acc_manager })?;
 
     // response
     Ok(Response::new().add_attribute("method", "instantiate"))
@@ -81,21 +73,77 @@ pub fn execute(
     }
 }
 
+fn verify_caller_is_vault_owner(info: &MessageInfo, deps: &DepsMut) -> Result<(), ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+    let is_owner = info.sender.eq(&config.owner);
+
+    if !is_owner {
+        return Err(ContractError::Unauthorized {});
+    }
+
+    Ok(())
+}
+
+fn get_amount_for_denom(coins: &[Coin], denom: &str) -> Coin {
+    let amount: Uint128 = coins
+        .iter()
+        .filter(|c| c.denom == denom)
+        .map(|c| c.amount)
+        .sum();
+
+    Coin {
+        amount,
+        denom: denom.to_string(),
+    }
+}
+
+fn validate_exact_input_amount_and_denom(
+    deps: &DepsMut,
+    coins: &[Coin],
+    given_amount: Uint128,
+) -> Result<(), ContractError> {
+    let denom_str = deps.querier.query_bonded_denom()?;
+    let actual = get_amount_for_denom(coins, denom_str.as_str());
+
+    if actual.amount != given_amount {
+        return Err(ContractError::IncorrectCoinInfoProvided {
+            provided: actual,
+            required: Coin {
+                denom: denom_str,
+                amount: given_amount,
+            },
+        });
+    }
+
+    Ok(())
+}
+
 pub fn execute_delegate(
     deps: DepsMut,
-    env: Env,
+    _env: Env,
     info: &MessageInfo,
     validator: String,
     amount: Uint128,
 ) -> Result<Response, ContractError> {
-    // todo
-    // verify vault owner that is calling this method
-    // verify the correct amount and denom was sent along to be staked
-    // increase the current total amount staked in the contract state
-    // create sdk_msg for staking tokens
-    // respond
+    verify_caller_is_vault_owner(&info, &deps)?;
+    validate_exact_input_amount_and_denom(&deps, &info.funds, amount)?;
 
-    Ok(Response::default())
+    // create sdk_msg for staking tokens
+    let denom_str = deps.querier.query_bonded_denom()?;
+    let sdk_msg = StakingMsg::Delegate {
+        validator: validator.clone(),
+        amount: Coin {
+            denom: denom_str,
+            amount,
+        },
+    };
+
+    // respond
+    Ok(Response::new().add_message(sdk_msg).add_attributes(vec![
+        attr("method", "delegate"),
+        attr("amount", amount.to_string()),
+        attr("validator", validator),
+    ]))
 }
 
 pub fn execute_undelegate(

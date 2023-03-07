@@ -1,16 +1,20 @@
 #[cfg(test)]
 mod tests {
-    use crate::msg::{InfoResponse, InstantiateMsg, QueryMsg};
-    use cosmwasm_std::{Addr, Coin, Empty, Uint128};
-    use cw_multi_test::{App, AppBuilder, Contract, ContractWrapper, Executor};
+    use crate::msg::{ExecuteMsg, InfoResponse, InstantiateMsg, QueryMsg};
+    use cosmwasm_std::{testing::mock_env, Addr, Coin, Decimal, Empty, Uint128, Validator};
+    use cw_multi_test::{App, AppBuilder, Contract, ContractWrapper, Executor, StakingInfo};
 
     const USER: &str = "user";
-    const STAKING_DENOM: &str = "udenom";
+    const STAKING_DENOM: &str = "TOKEN";
     const IBC_DENOM_1: &str = "ibc/usdc_denom";
     const SUPPLY: u128 = 500_000_000u128;
+    const VALIDATOR_ADDRESS: &str = "validator";
 
     fn mock_app() -> App {
-        AppBuilder::new().build(|router, _, storage| {
+        AppBuilder::new().build(|router, api, storage| {
+            let env = mock_env();
+
+            // Set the initial balances
             router
                 .bank
                 .init_balance(
@@ -28,6 +32,35 @@ mod tests {
                     ],
                 )
                 .unwrap();
+
+            // Setup staking module for the correct mock data.
+            router
+                .staking
+                .setup(
+                    storage,
+                    StakingInfo {
+                        bonded_denom: STAKING_DENOM.to_string(),
+                        unbonding_time: 1, // in seconds
+                        apr: Decimal::percent(10),
+                    },
+                )
+                .unwrap();
+
+            // Add mock validator
+            router
+                .staking
+                .add_validator(
+                    api,
+                    storage,
+                    &env.block,
+                    Validator {
+                        address: VALIDATOR_ADDRESS.to_string(),
+                        commission: Decimal::zero(),
+                        max_commission: Decimal::one(),
+                        max_change_rate: Decimal::one(),
+                    },
+                )
+                .unwrap();
         })
     }
 
@@ -43,7 +76,6 @@ mod tests {
         let template_id = app.store_code(contract_template());
 
         let msg = InstantiateMsg {
-            staking_denom: STAKING_DENOM.to_string(),
             owner_address: USER.to_string(),
             account_manager_address: USER.to_string(),
         };
@@ -77,6 +109,101 @@ mod tests {
 
     #[test]
     fn test_delegate() {
-        // todo
+        // Step 1
+        // Instantiate contract instance
+        // ------------------------------------------------------------------------------
+        let mut router = mock_app();
+        let vault_c_addr = instantiate_vault(&mut router);
+
+        // Step 2
+        // set balance for wrong_owner so we can try to call the delegate method
+        // on a vault owned by USER
+        // ------------------------------------------------------------------------------
+        let amount = Uint128::new(1_000_000);
+        let wrong_owner = Addr::unchecked("WRONG_OWNER");
+        router
+            .send_tokens(
+                Addr::unchecked(USER),
+                wrong_owner.clone(),
+                &[Coin {
+                    denom: STAKING_DENOM.to_string(),
+                    amount,
+                }],
+            )
+            .unwrap();
+
+        // Step 3
+        // Test error case ContractError::Unauthorized {}
+        // ------------------------------------------------------------------------------
+        let delegate_msg = ExecuteMsg::Delegate {
+            validator: VALIDATOR_ADDRESS.to_string(),
+            amount,
+        };
+        router
+            .execute_contract(
+                wrong_owner,
+                vault_c_addr.clone(),
+                &delegate_msg,
+                &[Coin {
+                    denom: STAKING_DENOM.into(),
+                    amount,
+                }],
+            )
+            .unwrap_err();
+
+        // Step 4
+        // Test error case ContractError::IncorrectCoinInfoProvided {}
+        // ------------------------------------------------------------------------------
+        let delegate_msg = ExecuteMsg::Delegate {
+            validator: VALIDATOR_ADDRESS.to_string(),
+            amount,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &delegate_msg,
+                &[Coin {
+                    denom: STAKING_DENOM.into(),
+                    amount: Uint128::new(1_000),
+                }],
+            )
+            .unwrap_err();
+
+        // Step 5
+        // Call delegate method by the vault owner
+        // ------------------------------------------------------------------------------
+        let delegate_msg = ExecuteMsg::Delegate {
+            validator: VALIDATOR_ADDRESS.to_string(),
+            amount,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &delegate_msg,
+                &[Coin {
+                    denom: STAKING_DENOM.into(),
+                    amount,
+                }],
+            )
+            .unwrap();
+
+        // Step 6
+        // query the vault info to assert that the correct amount was delegated
+        // ------------------------------------------------------------------------------
+        let delegation = router
+            .wrap()
+            .query_delegation(vault_c_addr, VALIDATOR_ADDRESS.to_string())
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            delegation.amount,
+            Coin {
+                denom: STAKING_DENOM.to_string(),
+                amount
+            }
+        );
     }
 }

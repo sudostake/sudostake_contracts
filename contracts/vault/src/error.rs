@@ -1,4 +1,4 @@
-use cosmwasm_std::StdError;
+use cosmwasm_std::{Coin, StdError};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -9,8 +9,8 @@ pub enum ContractError {
     #[error("Unauthorized")]
     Unauthorized {},
 
-    #[error("Staking denom cannot be an empty string")]
-    InvalidStakingDenom {},
+    #[error("IncorrectCoinInfoProvided")]
+    IncorrectCoinInfoProvided { provided: Coin, required: Coin },
 
     #[error("Custom Error val: {val:?}")]
     CustomError { val: String },

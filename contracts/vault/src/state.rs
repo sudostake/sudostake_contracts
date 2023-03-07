@@ -6,8 +6,8 @@ use cw_storage_plus::Item;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
-    pub staking_denom: String,
     pub owner: Addr,
+    pub acc_manager: Addr,
 }
 
 // This stores the config variables during initialization of the contract
