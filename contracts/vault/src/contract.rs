@@ -148,14 +148,29 @@ pub fn execute_delegate(
 
 pub fn execute_undelegate(
     deps: DepsMut,
-    env: Env,
+    _env: Env,
     info: &MessageInfo,
     validator: String,
     amount: Uint128,
 ) -> Result<Response, ContractError> {
-    // TODO implement this˝
+    verify_caller_is_vault_owner(&info, &deps)?;
+
+    // create sdk_msg for un-staking tokens
+    let denom_str = deps.querier.query_bonded_denom()?;
+    let sdk_msg = StakingMsg::Undelegate {
+        validator: validator.clone(),
+        amount: Coin {
+            denom: denom_str,
+            amount,
+        },
+    };
+
     // respond
-    Ok(Response::default())
+    Ok(Response::new().add_message(sdk_msg).add_attributes(vec![
+        attr("method", "undelegate"),
+        attr("amount", amount.to_string()),
+        attr("validator", validator),
+    ]))
 }
 
 pub fn execute_redelegate(

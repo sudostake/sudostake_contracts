@@ -206,4 +206,75 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn test_undelegate() {
+        // Step 1
+        // Instantiate contract instance
+        // ------------------------------------------------------------------------------
+        let mut router = mock_app();
+        let vault_c_addr = instantiate_vault(&mut router);
+
+        // Step 2
+        // Call delegate method by the vault owner
+        // ------------------------------------------------------------------------------
+        let amount = Uint128::new(1_000_000);
+        let delegate_msg = ExecuteMsg::Delegate {
+            validator: VALIDATOR_ADDRESS.to_string(),
+            amount,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &delegate_msg,
+                &[Coin {
+                    denom: STAKING_DENOM.into(),
+                    amount,
+                }],
+            )
+            .unwrap();
+
+        // Step 3
+        // Call undelegate method by the vault owner
+        // ------------------------------------------------------------------------------
+        let undelegate_msg = ExecuteMsg::Undelegate {
+            validator: VALIDATOR_ADDRESS.to_string(),
+            amount,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &undelegate_msg,
+                &[],
+            )
+            .unwrap();
+
+        // Step 4
+        // Foward the blockchain ahead and process unbonding queue
+        // ------------------------------------------------------------------------------
+        router.update_block(|block| block.time = block.time.plus_seconds(10));
+        router
+            .sudo(cw_multi_test::SudoMsg::Staking(
+                cw_multi_test::StakingSudo::ProcessQueue {},
+            ))
+            .unwrap();
+
+        // Step 5
+        // Verify that the contract now has the amount unstaked as balance
+        // ------------------------------------------------------------------------------
+        let vault_balance = router
+            .wrap()
+            .query_balance(vault_c_addr, STAKING_DENOM)
+            .unwrap();
+
+        assert_eq!(
+            vault_balance,
+            Coin {
+                denom: STAKING_DENOM.to_string(),
+                amount
+            }
+        );
+    }
 }
