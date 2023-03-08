@@ -8,7 +8,8 @@ mod tests {
     const STAKING_DENOM: &str = "TOKEN";
     const IBC_DENOM_1: &str = "ibc/usdc_denom";
     const SUPPLY: u128 = 500_000_000u128;
-    const VALIDATOR_ADDRESS: &str = "validator";
+    const VALIDATOR_ONE_ADDRESS: &str = "validator_one";
+    const VALIDATOR_TWO_ADDRESS: &str = "validator_two";
 
     fn mock_app() -> App {
         AppBuilder::new().build(|router, api, storage| {
@@ -54,7 +55,23 @@ mod tests {
                     storage,
                     &env.block,
                     Validator {
-                        address: VALIDATOR_ADDRESS.to_string(),
+                        address: VALIDATOR_ONE_ADDRESS.to_string(),
+                        commission: Decimal::zero(),
+                        max_commission: Decimal::one(),
+                        max_change_rate: Decimal::one(),
+                    },
+                )
+                .unwrap();
+
+            // Add mock validator
+            router
+                .staking
+                .add_validator(
+                    api,
+                    storage,
+                    &env.block,
+                    Validator {
+                        address: VALIDATOR_TWO_ADDRESS.to_string(),
                         commission: Decimal::zero(),
                         max_commission: Decimal::one(),
                         max_change_rate: Decimal::one(),
@@ -136,7 +153,7 @@ mod tests {
         // Test error case ContractError::Unauthorized {}
         // ------------------------------------------------------------------------------
         let delegate_msg = ExecuteMsg::Delegate {
-            validator: VALIDATOR_ADDRESS.to_string(),
+            validator: VALIDATOR_ONE_ADDRESS.to_string(),
             amount,
         };
         router
@@ -155,7 +172,7 @@ mod tests {
         // Test error case ContractError::IncorrectCoinInfoProvided {}
         // ------------------------------------------------------------------------------
         let delegate_msg = ExecuteMsg::Delegate {
-            validator: VALIDATOR_ADDRESS.to_string(),
+            validator: VALIDATOR_ONE_ADDRESS.to_string(),
             amount,
         };
         router
@@ -174,7 +191,7 @@ mod tests {
         // Call delegate method by the vault owner
         // ------------------------------------------------------------------------------
         let delegate_msg = ExecuteMsg::Delegate {
-            validator: VALIDATOR_ADDRESS.to_string(),
+            validator: VALIDATOR_ONE_ADDRESS.to_string(),
             amount,
         };
         router
@@ -194,7 +211,7 @@ mod tests {
         // ------------------------------------------------------------------------------
         let delegation = router
             .wrap()
-            .query_delegation(vault_c_addr, VALIDATOR_ADDRESS.to_string())
+            .query_delegation(vault_c_addr, VALIDATOR_ONE_ADDRESS.to_string())
             .unwrap()
             .unwrap();
 
@@ -220,7 +237,7 @@ mod tests {
         // ------------------------------------------------------------------------------
         let amount = Uint128::new(1_000_000);
         let delegate_msg = ExecuteMsg::Delegate {
-            validator: VALIDATOR_ADDRESS.to_string(),
+            validator: VALIDATOR_ONE_ADDRESS.to_string(),
             amount,
         };
         router
@@ -239,7 +256,7 @@ mod tests {
         // Call undelegate method by the vault owner
         // ------------------------------------------------------------------------------
         let undelegate_msg = ExecuteMsg::Undelegate {
-            validator: VALIDATOR_ADDRESS.to_string(),
+            validator: VALIDATOR_ONE_ADDRESS.to_string(),
             amount,
         };
         router
@@ -271,6 +288,69 @@ mod tests {
 
         assert_eq!(
             vault_balance,
+            Coin {
+                denom: STAKING_DENOM.to_string(),
+                amount
+            }
+        );
+    }
+
+    #[test]
+    fn test_redelegate() {
+        // Step 1
+        // Instantiate contract instance
+        // ------------------------------------------------------------------------------
+        let mut router = mock_app();
+        let vault_c_addr = instantiate_vault(&mut router);
+
+        // Step 2
+        // delegate some tokens to VALIDATOR_ONE_ADDRESS
+        // ------------------------------------------------------------------------------
+        let amount = Uint128::new(1_000_000);
+        let delegate_msg = ExecuteMsg::Delegate {
+            validator: VALIDATOR_ONE_ADDRESS.to_string(),
+            amount,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &delegate_msg,
+                &[Coin {
+                    denom: STAKING_DENOM.into(),
+                    amount,
+                }],
+            )
+            .unwrap();
+
+        // Step 3
+        // redelegate tokens to VALIDATOR_TWO_ADDRESS
+        // ------------------------------------------------------------------------------
+        let redelegate_msg = ExecuteMsg::Redelegate {
+            src_validator: VALIDATOR_ONE_ADDRESS.to_string(),
+            dst_validator: VALIDATOR_TWO_ADDRESS.to_string(),
+            amount,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &redelegate_msg,
+                &[],
+            )
+            .unwrap();
+
+        // Step 4
+        // verify that VALIDATOR_TWO_ADDRESS now has the delegations of user
+        // ------------------------------------------------------------------------------
+        let delegation = router
+            .wrap()
+            .query_delegation(vault_c_addr, VALIDATOR_TWO_ADDRESS.to_string())
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            delegation.amount,
             Coin {
                 denom: STAKING_DENOM.to_string(),
                 amount
