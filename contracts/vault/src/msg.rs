@@ -62,7 +62,7 @@ pub enum ExecuteMsg {
 
     // Allows the vault owner to claim delegator rewards when there is no active LRO
     ClaimDelegatorRewards {
-        withdraw: Option<bool>,
+        withdraw: bool,
     },
 
     /// Allows the vault owner to open a liquidity request option

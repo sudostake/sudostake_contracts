@@ -89,6 +89,13 @@ mod tests {
         ))
     }
 
+    fn bank_balance(router: &mut App, addr: &Addr, denom: String) -> Coin {
+        router
+            .wrap()
+            .query_balance(addr.to_string(), denom)
+            .unwrap()
+    }
+
     fn instantiate_vault(app: &mut App) -> Addr {
         let template_id = app.store_code(contract_template());
 
@@ -354,6 +361,165 @@ mod tests {
             Coin {
                 denom: STAKING_DENOM.to_string(),
                 amount
+            }
+        );
+    }
+
+    #[test]
+    fn test_claim_delegator_rewards_without_withdrawing() {
+        // Step 1
+        // Instantiate contract instance
+        // ------------------------------------------------------------------------------
+        let mut router = mock_app();
+        let vault_c_addr = instantiate_vault(&mut router);
+
+        // Step 2
+        // Delegate to VALIDATOR_ONE_ADDRESS
+        // ------------------------------------------------------------------------------
+        let amount = Uint128::new(1_000_000);
+        let delegate_msg = ExecuteMsg::Delegate {
+            validator: VALIDATOR_ONE_ADDRESS.to_string(),
+            amount,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &delegate_msg,
+                &[Coin {
+                    denom: STAKING_DENOM.into(),
+                    amount,
+                }],
+            )
+            .unwrap();
+
+        // Step 3
+        // Delegate to VALIDATOR_TWO_ADDRESS
+        // ------------------------------------------------------------------------------
+        let amount = Uint128::new(1_000_000);
+        let delegate_msg = ExecuteMsg::Delegate {
+            validator: VALIDATOR_TWO_ADDRESS.to_string(),
+            amount,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &delegate_msg,
+                &[Coin {
+                    denom: STAKING_DENOM.into(),
+                    amount,
+                }],
+            )
+            .unwrap();
+
+        // Step 4
+        // Foward the blockchain ahead by one year
+        // ------------------------------------------------------------------------------
+        router.update_block(|block| block.time = block.time.plus_seconds(60 * 60 * 24 * 365));
+
+        // Step 5
+        // try claim rewards from all validators
+        // ------------------------------------------------------------------------------
+        let claim_rewards_msg = ExecuteMsg::ClaimDelegatorRewards { withdraw: false };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &claim_rewards_msg,
+                &[],
+            )
+            .unwrap();
+
+        // Step 6
+        // verify by inspecting contract balance
+        // ------------------------------------------------------------------------------
+        let balance = bank_balance(&mut router, &vault_c_addr, STAKING_DENOM.into());
+        assert_eq!(
+            balance,
+            Coin {
+                denom: STAKING_DENOM.to_string(),
+                amount: Uint128::new(2_00_000)
+            }
+        );
+    }
+
+    #[test]
+    fn test_claim_delegator_rewards_with_withdrawing() {
+        // Step 1
+        // Instantiate contract instance
+        // ------------------------------------------------------------------------------
+        let mut router = mock_app();
+        let vault_c_addr = instantiate_vault(&mut router);
+
+        // Step 2
+        // Delegate to VALIDATOR_ONE_ADDRESS
+        // ------------------------------------------------------------------------------
+        let amount = Uint128::new(1_000_000);
+        let delegate_msg = ExecuteMsg::Delegate {
+            validator: VALIDATOR_ONE_ADDRESS.to_string(),
+            amount,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &delegate_msg,
+                &[Coin {
+                    denom: STAKING_DENOM.into(),
+                    amount,
+                }],
+            )
+            .unwrap();
+
+        // Step 3
+        // Delegate to VALIDATOR_TWO_ADDRESS
+        // ------------------------------------------------------------------------------
+        let amount = Uint128::new(1_000_000);
+        let delegate_msg = ExecuteMsg::Delegate {
+            validator: VALIDATOR_TWO_ADDRESS.to_string(),
+            amount,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &delegate_msg,
+                &[Coin {
+                    denom: STAKING_DENOM.into(),
+                    amount,
+                }],
+            )
+            .unwrap();
+
+        // Step 4
+        // Foward the blockchain ahead by one year
+        // ------------------------------------------------------------------------------
+        router.update_block(|block| block.time = block.time.plus_seconds(60 * 60 * 24 * 365));
+
+        // Step 5
+        // try claim rewards from all validators
+        // ------------------------------------------------------------------------------
+        let claim_rewards_msg = ExecuteMsg::ClaimDelegatorRewards { withdraw: true };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &claim_rewards_msg,
+                &[],
+            )
+            .unwrap();
+
+        // Step 6
+        // verify by inspecting contract balance
+        // ------------------------------------------------------------------------------
+        let owner = Addr::unchecked(USER);
+        let balance = bank_balance(&mut router, &owner, STAKING_DENOM.into());
+        assert_eq!(
+            balance,
+            Coin {
+                denom: STAKING_DENOM.to_string(),
+                amount: Uint128::new(498_200_000)
             }
         );
     }

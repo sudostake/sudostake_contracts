@@ -2,8 +2,8 @@ use crate::error::ContractError;
 use crate::msg::{ExecuteMsg, InfoResponse, InstantiateMsg, LiquidityRequestOption, QueryMsg};
 use crate::state::{Config, CONFIG};
 use cosmwasm_std::{
-    attr, entry_point, to_binary, Binary, Coin, Deps, DepsMut, Env, MessageInfo, Response,
-    StakingMsg, StdResult, Uint128, VoteOption,
+    attr, entry_point, to_binary, Addr, BankMsg, Binary, Coin, CosmosMsg, Deps, DepsMut,
+    DistributionMsg, Env, MessageInfo, Response, StakingMsg, StdResult, Uint128, VoteOption,
 };
 
 // contract info
@@ -118,6 +118,19 @@ fn validate_exact_input_amount_and_denom(
     Ok(())
 }
 
+fn get_bank_transfer_to_msg(recipient: &Addr, denom: &str, native_amount: Uint128) -> CosmosMsg {
+    let transfer_bank_msg = BankMsg::Send {
+        to_address: recipient.into(),
+        amount: vec![Coin {
+            denom: denom.into(),
+            amount: native_amount,
+        }],
+    };
+
+    let transfer_bank_cosmos_msg: CosmosMsg = transfer_bank_msg.into();
+    transfer_bank_cosmos_msg
+}
+
 pub fn execute_delegate(
     deps: DepsMut,
     _env: Env,
@@ -207,11 +220,51 @@ pub fn execute_claim_delegator_rewards(
     deps: DepsMut,
     env: Env,
     info: &MessageInfo,
-    withdraw: Option<bool>,
+    withdraw: bool,
 ) -> Result<Response, ContractError> {
-    // TODO implement this˝
+    verify_caller_is_vault_owner(&info, &deps)?;
+
+    // Update distribute_msgs and total_rewards_to_claim
+    let mut distribute_msgs = vec![];
+    let mut total_rewards_to_claim = Uint128::new(0);
+    deps.querier
+        .query_all_delegations(env.contract.address.clone())?
+        .iter()
+        .for_each(|d| {
+            distribute_msgs.push(DistributionMsg::WithdrawDelegatorReward {
+                validator: d.validator.clone(),
+            });
+
+            // Update total_rewards_to_claim
+            // Q? can full_delegation.accumulated_rewards be of different denoms
+            deps.querier
+                .query_delegation(env.contract.address.clone(), d.validator.clone())
+                .unwrap()
+                .unwrap()
+                .accumulated_rewards
+                .iter()
+                // todo filter for only _bonded_denom balance
+                .for_each(|c| total_rewards_to_claim += c.amount);
+        });
+
+    // Add the sdk msg to optionally transfer the total_rewards to vault owner's address
+    let mut transfer_msg = vec![];
+    if withdraw && !total_rewards_to_claim.is_zero() {
+        transfer_msg.push(get_bank_transfer_to_msg(
+            &info.sender,
+            &deps.querier.query_bonded_denom()?,
+            total_rewards_to_claim,
+        ));
+    }
+
     // respond
-    Ok(Response::default())
+    Ok(Response::new()
+        .add_messages(distribute_msgs)
+        .add_messages(transfer_msg)
+        .add_attributes(vec![
+            attr("method", "claim_delegator_rewards"),
+            attr("total_rewards_to_claim", total_rewards_to_claim.to_string()),
+        ]))
 }
 
 pub fn execute_open_lro(
