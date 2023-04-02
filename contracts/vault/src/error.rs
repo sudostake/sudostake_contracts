@@ -1,4 +1,4 @@
-use cosmwasm_std::{Coin, StdError};
+use cosmwasm_std::{Coin, StdError, Uint128};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -9,8 +9,17 @@ pub enum ContractError {
     #[error("Unauthorized")]
     Unauthorized {},
 
-    #[error("IncorrectCoinInfoProvided")]
-    IncorrectCoinInfoProvided { provided: Coin, required: Coin },
+    #[error("InsufficientBalance")]
+    InsufficientBalance { required: Coin, available: Coin },
+
+    #[error("ValidatorIsInactive")]
+    ValidatorIsInactive { validator: String },
+
+    #[error("MaxUndelegateAmountExceeded: amount: {amount:?}, validator_delegation: {validator_delegation:?}")]
+    MaxUndelegateAmountExceeded {
+        amount: Uint128,
+        validator_delegation: Uint128,
+    },
 
     #[error("Custom Error val: {val:?}")]
     CustomError { val: String },

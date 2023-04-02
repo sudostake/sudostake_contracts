@@ -39,7 +39,7 @@ mod tests {
         ))
     }
 
-    fn instantiate_accounts_mamager(app: &mut App) -> Addr {
+    fn instantiate_accounts_manager(app: &mut App) -> Addr {
         let template_id = app.store_code(contract_template());
 
         let msg = InstantiateMsg {
@@ -48,14 +48,14 @@ mod tests {
         };
 
         let template_contract_addr = app
-            .instantiate_contract(template_id, Addr::unchecked(USER), &msg, &[], "accounts_mamager", None)
+            .instantiate_contract(template_id, Addr::unchecked(USER), &msg, &[], "accounts_manager", None)
             .unwrap();
 
         // return addr
         template_contract_addr
     }
 
-    fn get_accounts_mamager_info(app: &mut App, contract_address: &Addr) -> InfoResponse {
+    fn get_accounts_manager_info(app: &mut App, contract_address: &Addr) -> InfoResponse {
         let msg = QueryMsg::Info {};
         let result: InfoResponse = app.wrap().query_wasm_smart(contract_address, &msg).unwrap();
 
@@ -65,11 +65,11 @@ mod tests {
     #[test]
     fn test_instantiate() {
         let mut app = mock_app();
-        let amm_addr = instantiate_accounts_mamager(&mut app);
+        let amm_addr = instantiate_accounts_manager(&mut app);
 
         // Query for the contract info to assert that the lp token and other important
         // data was indeed saved
-        let info = get_accounts_mamager_info(&mut app, &amm_addr);
+        let info = get_accounts_manager_info(&mut app, &amm_addr);
 
         assert_eq!(info, InfoResponse {});
     }

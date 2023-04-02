@@ -1,6 +1,9 @@
 #[cfg(test)]
 mod tests {
-    use crate::msg::{ExecuteMsg, InfoResponse, InstantiateMsg, QueryMsg};
+    use crate::{
+        msg::{ExecuteMsg, InstantiateMsg, QueryMsg},
+        state::Config,
+    };
     use cosmwasm_std::{testing::mock_env, Addr, Coin, Decimal, Empty, Uint128, Validator};
     use cw_multi_test::{App, AppBuilder, Contract, ContractWrapper, Executor, StakingInfo};
 
@@ -112,9 +115,9 @@ mod tests {
         template_contract_addr
     }
 
-    fn get_vault_info(app: &mut App, contract_address: &Addr) -> InfoResponse {
-        let msg = QueryMsg::Info {};
-        let result: InfoResponse = app.wrap().query_wasm_smart(contract_address, &msg).unwrap();
+    fn get_vault_config(app: &mut App, contract_address: &Addr) -> Config {
+        let msg = QueryMsg::Config {};
+        let result: Config = app.wrap().query_wasm_smart(contract_address, &msg).unwrap();
 
         result
     }
@@ -124,11 +127,17 @@ mod tests {
         let mut app = mock_app();
         let amm_addr = instantiate_vault(&mut app);
 
-        // Query for the contract info to assert that the lp token and other important
-        // data was indeed saved
-        let info = get_vault_info(&mut app, &amm_addr);
+        // Query for the contract info to assert
+        // that all important data was indeed saved
+        let info = get_vault_config(&mut app, &amm_addr);
 
-        assert_eq!(info, InfoResponse {});
+        assert_eq!(
+            info,
+            Config {
+                owner: Addr::unchecked(USER),
+                acc_manager: Addr::unchecked(USER),
+            }
+        );
     }
 
     #[test]
@@ -140,15 +149,13 @@ mod tests {
         let vault_c_addr = instantiate_vault(&mut router);
 
         // Step 2
-        // set balance for wrong_owner so we can try to call the delegate method
-        // on a vault owned by USER
+        // Send some tokens to vault_c_addr
         // ------------------------------------------------------------------------------
         let amount = Uint128::new(1_000_000);
-        let wrong_owner = Addr::unchecked("WRONG_OWNER");
         router
             .send_tokens(
                 Addr::unchecked(USER),
-                wrong_owner.clone(),
+                vault_c_addr.clone(),
                 &[Coin {
                     denom: STAKING_DENOM.to_string(),
                     amount,
@@ -159,27 +166,21 @@ mod tests {
         // Step 3
         // Test error case ContractError::Unauthorized {}
         // ------------------------------------------------------------------------------
+        let wrong_owner = Addr::unchecked("WRONG_OWNER");
         let delegate_msg = ExecuteMsg::Delegate {
             validator: VALIDATOR_ONE_ADDRESS.to_string(),
             amount,
         };
         router
-            .execute_contract(
-                wrong_owner,
-                vault_c_addr.clone(),
-                &delegate_msg,
-                &[Coin {
-                    denom: STAKING_DENOM.into(),
-                    amount,
-                }],
-            )
+            .execute_contract(wrong_owner, vault_c_addr.clone(), &delegate_msg, &[])
             .unwrap_err();
 
         // Step 4
-        // Test error case ContractError::IncorrectCoinInfoProvided {}
+        // Test error case ContractError::ValidatorIsInactive {}
         // ------------------------------------------------------------------------------
+        let inactive_validator = String::from("validator_inactive");
         let delegate_msg = ExecuteMsg::Delegate {
-            validator: VALIDATOR_ONE_ADDRESS.to_string(),
+            validator: inactive_validator,
             amount,
         };
         router
@@ -187,14 +188,27 @@ mod tests {
                 Addr::unchecked(USER),
                 vault_c_addr.clone(),
                 &delegate_msg,
-                &[Coin {
-                    denom: STAKING_DENOM.into(),
-                    amount: Uint128::new(1_000),
-                }],
+                &[],
             )
             .unwrap_err();
 
         // Step 5
+        // Test error case ContractError::InsufficientBalance {}
+        // ------------------------------------------------------------------------------
+        let delegate_msg = ExecuteMsg::Delegate {
+            validator: VALIDATOR_ONE_ADDRESS.to_string(),
+            amount: amount + Uint128::new(1_000_000),
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &delegate_msg,
+                &[],
+            )
+            .unwrap_err();
+
+        // Step 6
         // Call delegate method by the vault owner
         // ------------------------------------------------------------------------------
         let delegate_msg = ExecuteMsg::Delegate {
@@ -206,95 +220,21 @@ mod tests {
                 Addr::unchecked(USER),
                 vault_c_addr.clone(),
                 &delegate_msg,
-                &[Coin {
-                    denom: STAKING_DENOM.into(),
-                    amount,
-                }],
+                &[],
             )
             .unwrap();
 
-        // Step 6
-        // query the vault info to assert that the correct amount was delegated
+        // Step 7
+        // query the vault delegations to assert that the correct amount was delegated
         // ------------------------------------------------------------------------------
         let delegation = router
             .wrap()
-            .query_delegation(vault_c_addr, VALIDATOR_ONE_ADDRESS.to_string())
+            .query_delegation(vault_c_addr.clone(), VALIDATOR_ONE_ADDRESS.to_string())
             .unwrap()
             .unwrap();
 
         assert_eq!(
             delegation.amount,
-            Coin {
-                denom: STAKING_DENOM.to_string(),
-                amount
-            }
-        );
-    }
-
-    #[test]
-    fn test_undelegate() {
-        // Step 1
-        // Instantiate contract instance
-        // ------------------------------------------------------------------------------
-        let mut router = mock_app();
-        let vault_c_addr = instantiate_vault(&mut router);
-
-        // Step 2
-        // Call delegate method by the vault owner
-        // ------------------------------------------------------------------------------
-        let amount = Uint128::new(1_000_000);
-        let delegate_msg = ExecuteMsg::Delegate {
-            validator: VALIDATOR_ONE_ADDRESS.to_string(),
-            amount,
-        };
-        router
-            .execute_contract(
-                Addr::unchecked(USER),
-                vault_c_addr.clone(),
-                &delegate_msg,
-                &[Coin {
-                    denom: STAKING_DENOM.into(),
-                    amount,
-                }],
-            )
-            .unwrap();
-
-        // Step 3
-        // Call undelegate method by the vault owner
-        // ------------------------------------------------------------------------------
-        let undelegate_msg = ExecuteMsg::Undelegate {
-            validator: VALIDATOR_ONE_ADDRESS.to_string(),
-            amount,
-        };
-        router
-            .execute_contract(
-                Addr::unchecked(USER),
-                vault_c_addr.clone(),
-                &undelegate_msg,
-                &[],
-            )
-            .unwrap();
-
-        // Step 4
-        // Foward the blockchain ahead and process unbonding queue
-        // ------------------------------------------------------------------------------
-        router.update_block(|block| block.time = block.time.plus_seconds(10));
-        router
-            .sudo(cw_multi_test::SudoMsg::Staking(
-                cw_multi_test::StakingSudo::ProcessQueue {},
-            ))
-            .unwrap();
-
-        // Step 5
-        // Verify that the contract now has the amount unstaked as balance
-        // ------------------------------------------------------------------------------
-        let vault_balance = router
-            .wrap()
-            .query_balance(vault_c_addr, STAKING_DENOM)
-            .unwrap();
-
-        assert_eq!(
-            vault_balance,
             Coin {
                 denom: STAKING_DENOM.to_string(),
                 amount
@@ -331,6 +271,37 @@ mod tests {
             .unwrap();
 
         // Step 3
+        // Test error case ContractError::Unauthorized {}
+        // ------------------------------------------------------------------------------
+        let wrong_owner = Addr::unchecked("WRONG_OWNER");
+        let redelegate_msg = ExecuteMsg::Redelegate {
+            src_validator: VALIDATOR_ONE_ADDRESS.to_string(),
+            dst_validator: VALIDATOR_TWO_ADDRESS.to_string(),
+            amount,
+        };
+        router
+            .execute_contract(wrong_owner, vault_c_addr.clone(), &redelegate_msg, &[])
+            .unwrap_err();
+
+        // Step 4
+        // Test error case ContractError::ValidatorIsInactive {}
+        // ------------------------------------------------------------------------------
+        let inactive_dst_validator = String::from("validator_inactive");
+        let redelegate_msg = ExecuteMsg::Redelegate {
+            src_validator: VALIDATOR_ONE_ADDRESS.to_string(),
+            dst_validator: inactive_dst_validator,
+            amount,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &redelegate_msg,
+                &[],
+            )
+            .unwrap_err();
+
+        // Step 5
         // redelegate tokens to VALIDATOR_TWO_ADDRESS
         // ------------------------------------------------------------------------------
         let redelegate_msg = ExecuteMsg::Redelegate {
@@ -347,7 +318,7 @@ mod tests {
             )
             .unwrap();
 
-        // Step 4
+        // Step 6
         // verify that VALIDATOR_TWO_ADDRESS now has the delegations of user
         // ------------------------------------------------------------------------------
         let delegation = router
@@ -366,7 +337,117 @@ mod tests {
     }
 
     #[test]
-    fn test_claim_delegator_rewards_without_withdrawing() {
+    fn test_undelegate() {
+        // Step 1
+        // Instantiate contract instance
+        // ------------------------------------------------------------------------------
+        let mut router = mock_app();
+        let vault_c_addr = instantiate_vault(&mut router);
+
+        // Step 2
+        // Send some tokens to vault_c_addr
+        // ------------------------------------------------------------------------------
+        let amount = Uint128::new(1_000_000);
+        router
+            .send_tokens(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &[Coin {
+                    denom: STAKING_DENOM.to_string(),
+                    amount,
+                }],
+            )
+            .unwrap();
+
+        // Step 3
+        // Call delegate method by the vault owner
+        // ------------------------------------------------------------------------------
+        let delegate_msg = ExecuteMsg::Delegate {
+            validator: VALIDATOR_ONE_ADDRESS.to_string(),
+            amount,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &delegate_msg,
+                &[],
+            )
+            .unwrap();
+
+        // Step 4
+        // Test error case ContractError::Unauthorized {}
+        // ------------------------------------------------------------------------------
+        let wrong_owner = Addr::unchecked("WRONG_OWNER");
+        let undelegate_msg = ExecuteMsg::Undelegate {
+            validator: VALIDATOR_ONE_ADDRESS.to_string(),
+            amount,
+        };
+        router
+            .execute_contract(wrong_owner, vault_c_addr.clone(), &undelegate_msg, &[])
+            .unwrap_err();
+
+        // Step 5
+        // Test error case ContractError::MaxUndelegateAmountExceeded {}
+        // ------------------------------------------------------------------------------
+        let undelegate_msg = ExecuteMsg::Undelegate {
+            validator: VALIDATOR_ONE_ADDRESS.to_string(),
+            amount: amount + Uint128::new(1_000_000),
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &undelegate_msg,
+                &[],
+            )
+            .unwrap_err();
+
+        // Step 6
+        // Call undelegate method by the vault owner
+        // ------------------------------------------------------------------------------
+        let undelegate_msg = ExecuteMsg::Undelegate {
+            validator: VALIDATOR_ONE_ADDRESS.to_string(),
+            amount,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &undelegate_msg,
+                &[],
+            )
+            .unwrap();
+
+        // Step 7
+        // Foward the blockchain ahead and process unbonding queue
+        // ------------------------------------------------------------------------------
+        router.update_block(|block| block.time = block.time.plus_seconds(10));
+        router
+            .sudo(cw_multi_test::SudoMsg::Staking(
+                cw_multi_test::StakingSudo::ProcessQueue {},
+            ))
+            .unwrap();
+
+        // Step 8
+        // Verify that the contract now has the amount unstaked as balance
+        // ------------------------------------------------------------------------------
+        let vault_balance = router
+            .wrap()
+            .query_balance(vault_c_addr.clone(), STAKING_DENOM)
+            .unwrap();
+
+        assert_eq!(
+            vault_balance,
+            Coin {
+                denom: STAKING_DENOM.to_string(),
+                amount
+            }
+        );
+    }
+
+    #[test]
+    fn test_claim_delegator_rewards() {
         // Step 1
         // Instantiate contract instance
         // ------------------------------------------------------------------------------
@@ -421,7 +502,7 @@ mod tests {
         // Step 5
         // try claim rewards from all validators
         // ------------------------------------------------------------------------------
-        let claim_rewards_msg = ExecuteMsg::ClaimDelegatorRewards { withdraw: false };
+        let claim_rewards_msg = ExecuteMsg::ClaimDelegatorRewards {};
         router
             .execute_contract(
                 Addr::unchecked(USER),
@@ -440,86 +521,6 @@ mod tests {
             Coin {
                 denom: STAKING_DENOM.to_string(),
                 amount: Uint128::new(2_00_000)
-            }
-        );
-    }
-
-    #[test]
-    fn test_claim_delegator_rewards_with_withdrawing() {
-        // Step 1
-        // Instantiate contract instance
-        // ------------------------------------------------------------------------------
-        let mut router = mock_app();
-        let vault_c_addr = instantiate_vault(&mut router);
-
-        // Step 2
-        // Delegate to VALIDATOR_ONE_ADDRESS
-        // ------------------------------------------------------------------------------
-        let amount = Uint128::new(1_000_000);
-        let delegate_msg = ExecuteMsg::Delegate {
-            validator: VALIDATOR_ONE_ADDRESS.to_string(),
-            amount,
-        };
-        router
-            .execute_contract(
-                Addr::unchecked(USER),
-                vault_c_addr.clone(),
-                &delegate_msg,
-                &[Coin {
-                    denom: STAKING_DENOM.into(),
-                    amount,
-                }],
-            )
-            .unwrap();
-
-        // Step 3
-        // Delegate to VALIDATOR_TWO_ADDRESS
-        // ------------------------------------------------------------------------------
-        let amount = Uint128::new(1_000_000);
-        let delegate_msg = ExecuteMsg::Delegate {
-            validator: VALIDATOR_TWO_ADDRESS.to_string(),
-            amount,
-        };
-        router
-            .execute_contract(
-                Addr::unchecked(USER),
-                vault_c_addr.clone(),
-                &delegate_msg,
-                &[Coin {
-                    denom: STAKING_DENOM.into(),
-                    amount,
-                }],
-            )
-            .unwrap();
-
-        // Step 4
-        // Foward the blockchain ahead by one year
-        // ------------------------------------------------------------------------------
-        router.update_block(|block| block.time = block.time.plus_seconds(60 * 60 * 24 * 365));
-
-        // Step 5
-        // try claim rewards from all validators
-        // ------------------------------------------------------------------------------
-        let claim_rewards_msg = ExecuteMsg::ClaimDelegatorRewards { withdraw: true };
-        router
-            .execute_contract(
-                Addr::unchecked(USER),
-                vault_c_addr.clone(),
-                &claim_rewards_msg,
-                &[],
-            )
-            .unwrap();
-
-        // Step 6
-        // verify by inspecting contract balance
-        // ------------------------------------------------------------------------------
-        let owner = Addr::unchecked(USER);
-        let balance = bank_balance(&mut router, &owner, STAKING_DENOM.into());
-        assert_eq!(
-            balance,
-            Coin {
-                denom: STAKING_DENOM.to_string(),
-                amount: Uint128::new(498_200_000)
             }
         );
     }

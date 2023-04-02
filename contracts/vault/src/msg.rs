@@ -10,31 +10,27 @@ pub struct InstantiateMsg {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum VotingOptions {
-    CastSimpleVote,
-    CastWeightedVote,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum LiquidityRequestOption {
+pub enum LiquidityRequestOptionMsg {
     FixedTermRental {
         requested_liquidity: Coin,
         duration_in_days: u32,
-        vote_options: Vec<VotingOptions>,
+        is_lp_user: bool,
+        can_cast_vote: bool,
     },
     FixedInterestRental {
         requested_liquidity: Coin,
         claimable_tokens: Coin,
-        vote_options: Vec<VotingOptions>,
+        is_lp_user: bool,
+        can_cast_vote: bool,
     },
     FixedTermLoan {
         requested_liquidity: Coin,
         to_pay_back: Coin,
         duration_in_days: u32,
-        token_amount_to_liquidate_on_default: Coin,
-        vote_options: Vec<VotingOptions>,
+        collateral: Coin,
         can_claim_rewards: bool,
+        is_lp_user: bool,
+        can_cast_vote: bool,
     },
 }
 
@@ -47,12 +43,6 @@ pub enum ExecuteMsg {
         amount: Uint128,
     },
 
-    /// Allows the vault owner to un-stake the assets from a validator.
-    Undelegate {
-        validator: String,
-        amount: Uint128,
-    },
-
     /// Allows the vault owner to redelegate their stake to another validator.
     Redelegate {
         src_validator: String,
@@ -60,31 +50,23 @@ pub enum ExecuteMsg {
         amount: Uint128,
     },
 
-    // Allows the vault owner to claim delegator rewards when there is no active LRO
-    ClaimDelegatorRewards {
-        withdraw: bool,
+    /// Allows the vault owner to un-stake the assets from a validator.
+    Undelegate {
+        validator: String,
+        amount: Uint128,
     },
 
     /// Allows the vault owner to open a liquidity request option
     OpenLRO {
-        option: LiquidityRequestOption,
+        option: LiquidityRequestOptionMsg,
     },
 
     /// Allows the vault owner to close a liquidity request option
     /// before the offer is accepted by other market participants.
     ClosePendingLRO {},
 
-    /// Allows a liquidity provider (which could be an individual or an LP_GROUP contract)
-    /// to accept a liquidity request option.
-    AcceptLRO {
-        is_contract_user: Option<bool>,
-    },
-
-    /// Allows the vault owner/controller to process LRO claims.
-    ProcessClaimsForLRO {},
-
     /// Allows the vault owner to withdraw funds from the vault.
-    Withdraw {
+    WithdrawBalance {
         to_address: Option<String>,
         funds: Coin,
     },
@@ -94,7 +76,24 @@ pub enum ExecuteMsg {
         to_address: String,
     },
 
-    /// Allows vault owner/controller to cast a simple vote
+    /// Allows a liquidity provider (which could be an individual or an LP_GROUP contract)
+    /// to accept a liquidity request option.
+    AcceptLRO {
+        is_contract_user: Option<bool>,
+    },
+
+    // Allows the vault owner(s) to claim delegator rewards
+    ClaimDelegatorRewards {},
+
+    /// Allows the vault owner/lender to liquidate collateral
+    /// by unstaking the specified amount.
+    LiquidateCollateral {},
+
+    /// Allows the vault owner/lender to transfer collateral
+    /// to lender's address when funds becomes available
+    RepayLoan {},
+
+    /// Allows vault owner/lender to cast a simple vote
     Vote {
         proposal_id: u64,
         vote: VoteOption,
@@ -105,8 +104,5 @@ pub enum ExecuteMsg {
 #[serde(rename_all = "snake_case")]
 pub enum QueryMsg {
     /// Returns InfoResponse
-    Info {},
+    Config {},
 }
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct InfoResponse {}

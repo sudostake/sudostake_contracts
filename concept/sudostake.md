@@ -16,6 +16,7 @@ Vaults are instances of a smart-contract that manages staked tokens on behalf of
 
 * Instant transfer of vault ownership to another owner/entity.
 * Vault owners can choose to open liquidity request options (more on this in a bit).
+* Payment streaming, where vault owner can add a beneficiary who can claim rewards
 * Ability to create multiple vaults for managing different asset groups.
 * The flexibility of vault-based asset management encourages more assets to be bonded to the network, which increases the overall network security.
 

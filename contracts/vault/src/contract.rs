@@ -1,9 +1,11 @@
+use crate::authorisation::{ActionTypes, _authorize};
 use crate::error::ContractError;
-use crate::msg::{ExecuteMsg, InfoResponse, InstantiateMsg, LiquidityRequestOption, QueryMsg};
-use crate::state::{Config, CONFIG};
+use crate::helpers::{has_active_lro, validate_amount_to_delegate, verify_validator_is_active};
+use crate::msg::{ExecuteMsg, InstantiateMsg, LiquidityRequestOptionMsg, QueryMsg};
+use crate::state::{Config, ACTIVE_LRO, CONFIG};
 use cosmwasm_std::{
-    attr, entry_point, to_binary, Addr, BankMsg, Binary, Coin, CosmosMsg, Deps, DepsMut,
-    DistributionMsg, Env, MessageInfo, Response, StakingMsg, StdResult, Uint128, VoteOption,
+    attr, entry_point, to_binary, Binary, Coin, Deps, DepsMut, DistributionMsg, Env, MessageInfo,
+    Response, StakingMsg, StdResult, Uint128, VoteOption,
 };
 
 // contract info
@@ -29,120 +31,124 @@ pub fn instantiate(
     // Save contract state
     CONFIG.save(deps.storage, &Config { owner, acc_manager })?;
 
+    // Init ACTIVE_LRO to None
+    ACTIVE_LRO.save(deps.storage, &None)?;
+
     // response
     Ok(Response::new().add_attribute("method", "instantiate"))
 }
 
 #[entry_point]
 pub fn execute(
-    _deps: DepsMut,
+    deps: DepsMut,
     _env: Env,
     _info: MessageInfo,
     _msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match _msg {
+        // Vault owner operated functions
         ExecuteMsg::Delegate { validator, amount } => {
-            execute_delegate(_deps, _env, &_info, validator, amount)
-        }
-        ExecuteMsg::Undelegate { validator, amount } => {
-            execute_undelegate(_deps, _env, &_info, validator, amount)
+            _authorize(
+                &deps,
+                _info.sender.clone(),
+                ActionTypes::Delegate(has_active_lro(&deps)?),
+            )?;
+            execute_delegate(deps, _env, &_info, validator, amount)
         }
         ExecuteMsg::Redelegate {
             src_validator,
             dst_validator,
             amount,
-        } => execute_redelegate(_deps, _env, &_info, src_validator, dst_validator, amount),
-        ExecuteMsg::ClaimDelegatorRewards { withdraw } => {
-            execute_claim_delegator_rewards(_deps, _env, &_info, withdraw)
+        } => {
+            _authorize(&deps, _info.sender.clone(), ActionTypes::Redelegate {})?;
+            execute_redelegate(deps, _env, &_info, src_validator, dst_validator, amount)
         }
-        ExecuteMsg::OpenLRO { option } => execute_open_lro(_deps, _env, &_info, option),
-        ExecuteMsg::ClosePendingLRO {} => execute_close_pending_lro(_deps, _env, &_info),
-        ExecuteMsg::AcceptLRO { is_contract_user } => {
-            execute_accept_lro(_deps, _env, &_info, is_contract_user)
+        ExecuteMsg::Undelegate { validator, amount } => {
+            _authorize(
+                &deps,
+                _info.sender.clone(),
+                ActionTypes::Undelegate(has_active_lro(&deps)?),
+            )?;
+            execute_undelegate(deps, _env, &_info, validator, amount)
         }
-        ExecuteMsg::ProcessClaimsForLRO {} => execute_process_claims_for_lro(_deps, _env, &_info),
-        ExecuteMsg::Withdraw { to_address, funds } => {
-            execute_withdraw(_deps, _env, &_info, to_address, funds)
+        ExecuteMsg::OpenLRO { option } => {
+            _authorize(
+                &deps,
+                _info.sender.clone(),
+                ActionTypes::OpenLRO(has_active_lro(&deps)?),
+            )?;
+            execute_open_lro(deps, _env, &_info, option)
         }
+        ExecuteMsg::ClosePendingLRO {} => {
+            _authorize(&deps, _info.sender.clone(), ActionTypes::ClosePendingLRO {})?;
+            execute_close_pending_lro(deps, _env, &_info)
+        }
+        ExecuteMsg::WithdrawBalance { to_address, funds } => {
+            _authorize(&deps, _info.sender.clone(), ActionTypes::WithdrawBalance {})?;
+            execute_withdraw(deps, _env, &_info, to_address, funds)
+        }
+
         ExecuteMsg::TransferOwnership { to_address } => {
-            execute_transfer_ownership(_deps, _env, &_info, to_address)
+            _authorize(
+                &deps,
+                _info.sender.clone(),
+                ActionTypes::TransferOwnership {},
+            )?;
+            execute_transfer_ownership(deps, _env, &_info, to_address)
+        }
+
+        // Lender operated functions
+        ExecuteMsg::AcceptLRO { is_contract_user } => {
+            _authorize(&deps, _info.sender.clone(), ActionTypes::AcceptLRO {})?;
+            execute_accept_lro(deps, _env, &_info, is_contract_user)
+        }
+
+        // Vault owner + lender operated functions
+        ExecuteMsg::ClaimDelegatorRewards {} => {
+            _authorize(
+                &deps,
+                _info.sender.clone(),
+                ActionTypes::ClaimDelegatorRewards {},
+            )?;
+            execute_claim_delegator_rewards(deps, _env, &_info)
+        }
+        ExecuteMsg::LiquidateCollateral {} => {
+            _authorize(
+                &deps,
+                _info.sender.clone(),
+                ActionTypes::LiquidateCollateral {},
+            )?;
+            execute_liquidate_collateral(deps, _env, &_info)
+        }
+        ExecuteMsg::RepayLoan {} => {
+            _authorize(&deps, _info.sender.clone(), ActionTypes::RepayLoan {})?;
+            execute_repay_loan(deps, _env, &_info)
         }
         ExecuteMsg::Vote { proposal_id, vote } => {
-            execute_vote(_deps, _env, &_info, proposal_id, vote)
+            _authorize(
+                &deps,
+                _info.sender.clone(),
+                ActionTypes::Vote(has_active_lro(&deps)?),
+            )?;
+            execute_vote(deps, _env, &_info, proposal_id, vote)
         }
     }
-}
-
-fn verify_caller_is_vault_owner(info: &MessageInfo, deps: &DepsMut) -> Result<(), ContractError> {
-    let config = CONFIG.load(deps.storage)?;
-    let is_owner = info.sender.eq(&config.owner);
-
-    if !is_owner {
-        return Err(ContractError::Unauthorized {});
-    }
-
-    Ok(())
-}
-
-fn get_amount_for_denom(coins: &[Coin], denom: &str) -> Coin {
-    let amount: Uint128 = coins
-        .iter()
-        .filter(|c| c.denom == denom)
-        .map(|c| c.amount)
-        .sum();
-
-    Coin {
-        amount,
-        denom: denom.to_string(),
-    }
-}
-
-fn validate_exact_input_amount_and_denom(
-    deps: &DepsMut,
-    coins: &[Coin],
-    given_amount: Uint128,
-) -> Result<(), ContractError> {
-    let denom_str = deps.querier.query_bonded_denom()?;
-    let actual = get_amount_for_denom(coins, denom_str.as_str());
-
-    if actual.amount != given_amount {
-        return Err(ContractError::IncorrectCoinInfoProvided {
-            provided: actual,
-            required: Coin {
-                denom: denom_str,
-                amount: given_amount,
-            },
-        });
-    }
-
-    Ok(())
-}
-
-fn get_bank_transfer_to_msg(recipient: &Addr, denom: &str, native_amount: Uint128) -> CosmosMsg {
-    let transfer_bank_msg = BankMsg::Send {
-        to_address: recipient.into(),
-        amount: vec![Coin {
-            denom: denom.into(),
-            amount: native_amount,
-        }],
-    };
-
-    let transfer_bank_cosmos_msg: CosmosMsg = transfer_bank_msg.into();
-    transfer_bank_cosmos_msg
 }
 
 pub fn execute_delegate(
     deps: DepsMut,
-    _env: Env,
-    info: &MessageInfo,
+    env: Env,
+    _info: &MessageInfo,
     validator: String,
     amount: Uint128,
 ) -> Result<Response, ContractError> {
-    verify_caller_is_vault_owner(&info, &deps)?;
-    validate_exact_input_amount_and_denom(&deps, &info.funds, amount)?;
+    verify_validator_is_active(&deps, validator.as_str())?;
 
-    // create sdk_msg for staking tokens
+    // Validate amount to delegate is not above availabe contract balance
     let denom_str = deps.querier.query_bonded_denom()?;
+    validate_amount_to_delegate(&env, &deps, amount, denom_str.clone())?;
+
+    // Create sdk_msg for staking tokens
     let sdk_msg = StakingMsg::Delegate {
         validator: validator.clone(),
         amount: Coin {
@@ -151,36 +157,9 @@ pub fn execute_delegate(
         },
     };
 
-    // respond
+    // Respond
     Ok(Response::new().add_message(sdk_msg).add_attributes(vec![
         attr("method", "delegate"),
-        attr("amount", amount.to_string()),
-        attr("validator", validator),
-    ]))
-}
-
-pub fn execute_undelegate(
-    deps: DepsMut,
-    _env: Env,
-    info: &MessageInfo,
-    validator: String,
-    amount: Uint128,
-) -> Result<Response, ContractError> {
-    verify_caller_is_vault_owner(&info, &deps)?;
-
-    // create sdk_msg for un-staking tokens
-    let denom_str = deps.querier.query_bonded_denom()?;
-    let sdk_msg = StakingMsg::Undelegate {
-        validator: validator.clone(),
-        amount: Coin {
-            denom: denom_str,
-            amount,
-        },
-    };
-
-    // respond
-    Ok(Response::new().add_message(sdk_msg).add_attributes(vec![
-        attr("method", "undelegate"),
         attr("amount", amount.to_string()),
         attr("validator", validator),
     ]))
@@ -189,14 +168,14 @@ pub fn execute_undelegate(
 pub fn execute_redelegate(
     deps: DepsMut,
     _env: Env,
-    info: &MessageInfo,
+    _info: &MessageInfo,
     src_validator: String,
     dst_validator: String,
     amount: Uint128,
 ) -> Result<Response, ContractError> {
-    verify_caller_is_vault_owner(&info, &deps)?;
+    verify_validator_is_active(&deps, dst_validator.as_str())?;
 
-    // create sdk_msg for un-staking tokens
+    // Create sdk_msg for un-staking tokens
     let denom_str = deps.querier.query_bonded_denom()?;
     let sdk_msg = StakingMsg::Redelegate {
         src_validator: src_validator.clone(),
@@ -207,12 +186,53 @@ pub fn execute_redelegate(
         },
     };
 
-    // respond
+    // Respond
     Ok(Response::new().add_message(sdk_msg).add_attributes(vec![
         attr("method", "redelegate"),
         attr("amount", amount.to_string()),
         attr("src_validator", src_validator),
-        attr("src_validator", dst_validator),
+        attr("dst_validator", dst_validator),
+    ]))
+}
+
+pub fn execute_undelegate(
+    deps: DepsMut,
+    env: Env,
+    _info: &MessageInfo,
+    validator: String,
+    amount: Uint128,
+) -> Result<Response, ContractError> {
+    let validator_delegation = deps
+        .querier
+        .query_delegation(env.contract.address.clone(), validator.clone())
+        .unwrap();
+
+    // Verify amount <= validator_delegation
+    if validator_delegation.is_some() {
+        let data = validator_delegation.unwrap();
+        if amount > data.amount.amount {
+            return Err(ContractError::MaxUndelegateAmountExceeded {
+                amount,
+                validator_delegation: data.amount.amount,
+            });
+        }
+    }
+
+    // Create sdk_msg for un-staking tokens
+    let denom_str = deps.querier.query_bonded_denom()?;
+    let sdk_msg = StakingMsg::Undelegate {
+        validator: validator.clone(),
+        amount: Coin {
+            denom: denom_str,
+            amount,
+        },
+    };
+
+    // Respond
+    Ok(Response::new().add_message(sdk_msg).add_attributes(vec![
+        attr("method", "undelegate"),
+        attr("amount", amount.to_string()),
+        attr("validator", validator),
     ]))
 }
 
@@ -220,10 +240,7 @@ pub fn execute_claim_delegator_rewards(
     deps: DepsMut,
     env: Env,
     info: &MessageInfo,
-    withdraw: bool,
 ) -> Result<Response, ContractError> {
-    verify_caller_is_vault_owner(&info, &deps)?;
-
     // Update distribute_msgs and total_rewards_to_claim
     let mut distribute_msgs = vec![];
     let mut total_rewards_to_claim = Uint128::new(0);
@@ -236,31 +253,22 @@ pub fn execute_claim_delegator_rewards(
             });
 
             // Update total_rewards_to_claim
-            // Q? can full_delegation.accumulated_rewards be of different denoms
             deps.querier
                 .query_delegation(env.contract.address.clone(), d.validator.clone())
                 .unwrap()
                 .unwrap()
                 .accumulated_rewards
                 .iter()
-                // todo filter for only _bonded_denom balance
                 .for_each(|c| total_rewards_to_claim += c.amount);
         });
 
-    // Add the sdk msg to optionally transfer the total_rewards to vault owner's address
-    let mut transfer_msg = vec![];
-    if withdraw && !total_rewards_to_claim.is_zero() {
-        transfer_msg.push(get_bank_transfer_to_msg(
-            &info.sender,
-            &deps.querier.query_bonded_denom()?,
-            total_rewards_to_claim,
-        ));
-    }
+    // TODO
+    // here we distribute rewards allocations to all entities with allocations in the vault
+    // here we can also update total_staked, in case slashing or auto-unbonding
 
     // respond
     Ok(Response::new()
         .add_messages(distribute_msgs)
-        .add_messages(transfer_msg)
         .add_attributes(vec![
             attr("method", "claim_delegator_rewards"),
             attr("total_rewards_to_claim", total_rewards_to_claim.to_string()),
@@ -271,9 +279,9 @@ pub fn execute_open_lro(
     deps: DepsMut,
     env: Env,
     info: &MessageInfo,
-    option: LiquidityRequestOption,
+    option: LiquidityRequestOptionMsg,
 ) -> Result<Response, ContractError> {
-    // TODO implement this˝
+    // TODO implement this
     // respond
     Ok(Response::default())
 }
@@ -299,7 +307,17 @@ pub fn execute_accept_lro(
     Ok(Response::default())
 }
 
-pub fn execute_process_claims_for_lro(
+pub fn execute_liquidate_collateral(
+    deps: DepsMut,
+    env: Env,
+    info: &MessageInfo,
+) -> Result<Response, ContractError> {
+    // TODO implement this˝
+    // respond
+    Ok(Response::default())
+}
+
+pub fn execute_repay_loan(
     deps: DepsMut,
     env: Env,
     info: &MessageInfo,
@@ -316,7 +334,7 @@ pub fn execute_withdraw(
     to_address: Option<String>,
     funds: Coin,
 ) -> Result<Response, ContractError> {
-    // TODO implement this˝
+    // TODO implement this
     // respond
     Ok(Response::default())
 }
@@ -327,7 +345,7 @@ pub fn execute_transfer_ownership(
     info: &MessageInfo,
     to_address: String,
 ) -> Result<Response, ContractError> {
-    // TODO implement this˝
+    // TODO implement this
     // respond
     Ok(Response::default())
 }
@@ -339,7 +357,8 @@ pub fn execute_vote(
     proposal_id: u64,
     vote: VoteOption,
 ) -> Result<Response, ContractError> {
-    // TODO implement this˝
+    // TODO
+    // use cosmwasm_std::{GovMsg, VoteOption};
     // respond
     Ok(Response::default())
 }
@@ -347,10 +366,11 @@ pub fn execute_vote(
 #[entry_point]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        QueryMsg::Info {} => to_binary(&query_info(deps)?),
+        QueryMsg::Config {} => to_binary(&query_config(deps)?),
     }
 }
 
-pub fn query_info(_deps: Deps) -> StdResult<InfoResponse> {
-    Ok(InfoResponse {})
+pub fn query_config(_deps: Deps) -> StdResult<Config> {
+    let config = CONFIG.load(_deps.storage)?;
+    Ok(config)
 }
