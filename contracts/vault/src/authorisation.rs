@@ -15,10 +15,12 @@ pub enum ActionTypes {
     CloseLiquidityRequest(bool),
     WithdrawBalance,
     TransferOwnership,
-    AcceptLRO,
+    AcceptLiquidityRequest,
     ClaimDelegatorRewards,
     LiquidateCollateral,
     RepayLoan,
+
+    // todo: update voting authorizations
     Vote(bool),
 }
 
@@ -46,7 +48,7 @@ const LENDER_AUTHORIZATIONS: [ActionTypes; 4] = [
 ];
 
 // Applies to all users trying to lend to the open liquidity request option
-const OPEN_AUTHORIZATIONS: [ActionTypes; 1] = [ActionTypes::AcceptLRO];
+const OPEN_AUTHORIZATIONS: [ActionTypes; 1] = [ActionTypes::AcceptLiquidityRequest];
 
 pub fn authorize(
     deps: &DepsMut,

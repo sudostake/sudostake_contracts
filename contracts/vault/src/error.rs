@@ -12,6 +12,12 @@ pub enum ContractError {
     #[error("InsufficientBalance")]
     InsufficientBalance { required: Coin, available: Coin },
 
+    #[error("InvalidInputAmount:  required: {required:?}, received: {received:?}")]
+    InvalidInputAmount {
+        required: Uint128,
+        received: Uint128,
+    },
+
     #[error("ValidatorIsInactive")]
     ValidatorIsInactive { validator: String },
 

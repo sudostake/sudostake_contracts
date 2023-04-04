@@ -1,11 +1,13 @@
 use crate::authorisation::{authorize, ActionTypes};
 use crate::error::ContractError;
 use crate::helpers::{
-    has_open_liquidity_request, query_total_delegations, validate_amount_to_delegate,
-    verify_validator_is_active,
+    get_amount_for_denom, has_open_liquidity_request, query_total_delegations,
+    validate_amount_to_delegate, verify_validator_is_active,
 };
 use crate::msg::{ExecuteMsg, InfoResponse, InstantiateMsg, LiquidityRequestOptionMsg, QueryMsg};
-use crate::state::{ActiveOption, Config, CONFIG, OPEN_LIQUIDITY_REQUEST};
+use crate::state::{
+    ActiveOption, Config, LiquidityRequestOptionState, CONFIG, OPEN_LIQUIDITY_REQUEST,
+};
 use cosmwasm_std::{
     attr, entry_point, to_binary, Binary, Coin, Deps, DepsMut, DistributionMsg, Env, MessageInfo,
     Response, StakingMsg, StdResult, Uint128, VoteOption,
@@ -123,9 +125,13 @@ pub fn execute(
             execute_redelegate(deps, _env, &_info, src_validator, dst_validator, amount)
         }
 
-        ExecuteMsg::AcceptLRO { is_contract_user } => {
-            authorize(&deps, _info.sender.clone(), ActionTypes::AcceptLRO {})?;
-            execute_accept_liquidity_request(deps, _env, &_info, is_contract_user)
+        ExecuteMsg::AcceptLiquidityRequest { is_lp_group } => {
+            authorize(
+                &deps,
+                _info.sender.clone(),
+                ActionTypes::AcceptLiquidityRequest {},
+            )?;
+            execute_accept_liquidity_request(deps, _env, &_info, is_lp_group)
         }
 
         ExecuteMsg::RepayLoan {} => {
@@ -251,7 +257,6 @@ pub fn execute_open_liquidity_request(
         LiquidityRequestOptionMsg::FixedInterestRental {
             requested_amount,
             claimable_tokens,
-            is_lp_group: _,
             can_cast_vote: _,
         } => {
             if requested_amount.amount.is_zero() || claimable_tokens.is_zero() {
@@ -262,7 +267,6 @@ pub fn execute_open_liquidity_request(
         LiquidityRequestOptionMsg::FixedTermRental {
             requested_amount,
             duration_in_seconds,
-            is_lp_group: _,
             can_cast_vote: _,
         } => {
             if requested_amount.amount.is_zero() || duration_in_seconds == 0u64 {
@@ -275,7 +279,6 @@ pub fn execute_open_liquidity_request(
             duration_in_seconds,
             collateral_amount,
             can_claim_rewards: _,
-            is_lp_group: _,
             can_cast_vote: _,
         } => {
             if query_total_delegations(&deps, &env)? < collateral_amount
@@ -314,20 +317,128 @@ pub fn execute_close_liquidity_request(deps: DepsMut) -> Result<Response, Contra
     })?;
 
     // respond
-    Ok(Response::new().add_attributes(vec![attr("method", "close_pending_liquidity_request")]))
+    Ok(Response::new().add_attributes(vec![attr("method", "close_liquidity_request")]))
 }
 
 pub fn execute_accept_liquidity_request(
     deps: DepsMut,
     env: Env,
     info: &MessageInfo,
-    is_contract_user: Option<bool>,
+    is_lp_group: Option<bool>,
 ) -> Result<Response, ContractError> {
-    // TODO implement this
+    let option = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?.unwrap();
+
+    // activate the open liquidity request by mapping
+    // LiquidityRequestOptionMsg => LiquidityRequestOptionState
+    match option.msg {
+        LiquidityRequestOptionMsg::FixedInterestRental {
+            requested_amount,
+            claimable_tokens,
+            can_cast_vote,
+        } => {
+            // verify that the lender is sending the correct requested amount
+            let input_amount = get_amount_for_denom(&info.funds, requested_amount.denom.clone())?;
+            if requested_amount.amount != input_amount {
+                return Err(ContractError::InvalidInputAmount {
+                    required: requested_amount.amount,
+                    received: input_amount,
+                });
+            }
+
+            // update state
+            OPEN_LIQUIDITY_REQUEST.update(deps.storage, |data| -> Result<_, ContractError> {
+                let mut option = data.unwrap();
+                option.state = Some(LiquidityRequestOptionState::FixedInterestRental {
+                    requested_amount,
+                    claimable_tokens,
+                    already_claimed: Uint128::zero(),
+                    can_cast_vote,
+                    is_lp_group,
+                });
+
+                // update the lender info
+                option.lender = Some(info.sender.clone());
+                Ok(Some(option))
+            })?;
+        }
+
+        LiquidityRequestOptionMsg::FixedTermRental {
+            requested_amount,
+            duration_in_seconds,
+            can_cast_vote,
+        } => {
+            // verify that the lender is sending the correct requested amount
+            let input_amount = get_amount_for_denom(&info.funds, requested_amount.denom.clone())?;
+            if requested_amount.amount != input_amount {
+                return Err(ContractError::InvalidInputAmount {
+                    required: requested_amount.amount,
+                    received: input_amount,
+                });
+            }
+
+            // update state
+            OPEN_LIQUIDITY_REQUEST.update(deps.storage, |data| -> Result<_, ContractError> {
+                let mut option = data.unwrap();
+                option.state = Some(LiquidityRequestOptionState::FixedTermRental {
+                    requested_amount,
+                    start_time: env.block.time,
+                    end_time: env.block.time.plus_seconds(duration_in_seconds),
+                    last_claim_time: env.block.time,
+                    can_cast_vote,
+                    is_lp_group,
+                });
+
+                // update the lender info
+                option.lender = Some(info.sender.clone());
+                Ok(Some(option))
+            })?;
+        }
+
+        LiquidityRequestOptionMsg::FixedTermLoan {
+            requested_amount,
+            duration_in_seconds,
+            collateral_amount,
+            can_claim_rewards,
+            can_cast_vote,
+        } => {
+            // verify that the lender is sending the correct requested amount
+            let input_amount = get_amount_for_denom(&info.funds, requested_amount.denom.clone())?;
+            if requested_amount.amount != input_amount {
+                return Err(ContractError::InvalidInputAmount {
+                    required: requested_amount.amount,
+                    received: input_amount,
+                });
+            }
+
+            // update state
+            OPEN_LIQUIDITY_REQUEST.update(deps.storage, |data| -> Result<_, ContractError> {
+                let mut option = data.unwrap();
+                option.state = Some(LiquidityRequestOptionState::FixedTermLoan {
+                    requested_amount,
+                    collateral_amount,
+                    start_time: env.block.time,
+                    end_time: env.block.time.plus_seconds(duration_in_seconds),
+                    last_claim_time: if can_claim_rewards.is_some() {
+                        Some(env.block.time)
+                    } else {
+                        None
+                    },
+                    can_cast_vote,
+                    is_lp_group,
+                });
+
+                // update the lender info
+                option.lender = Some(info.sender.clone());
+                Ok(Some(option))
+            })?;
+        }
+    };
+
     // respond
-    Ok(Response::default())
+    Ok(Response::new().add_attributes(vec![attr("method", "accept_liquidity_request")]))
 }
 
+// TODO implement this next
 pub fn execute_claim_delegator_rewards(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
     // Update distribute_msgs and total_rewards_to_claim
     let mut distribute_msgs = vec![];
@@ -367,7 +478,7 @@ pub fn execute_liquidate_collateral(
     env: Env,
     info: &MessageInfo,
 ) -> Result<Response, ContractError> {
-    // TODO implement this˝
+    // TODO implement this
     // respond
     Ok(Response::default())
 }
@@ -377,7 +488,7 @@ pub fn execute_repay_loan(
     env: Env,
     info: &MessageInfo,
 ) -> Result<Response, ContractError> {
-    // TODO implement this˝
+    // TODO implement this
     // respond
     Ok(Response::default())
 }

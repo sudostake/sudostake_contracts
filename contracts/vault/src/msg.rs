@@ -16,13 +16,11 @@ pub enum LiquidityRequestOptionMsg {
     FixedTermRental {
         requested_amount: Coin,
         duration_in_seconds: u64,
-        is_lp_group: Option<bool>,
         can_cast_vote: Option<bool>,
     },
     FixedInterestRental {
         requested_amount: Coin,
         claimable_tokens: Uint128,
-        is_lp_group: Option<bool>,
         can_cast_vote: Option<bool>,
     },
     FixedTermLoan {
@@ -30,7 +28,6 @@ pub enum LiquidityRequestOptionMsg {
         collateral_amount: Uint128,
         duration_in_seconds: u64,
         can_claim_rewards: Option<bool>,
-        is_lp_group: Option<bool>,
         can_cast_vote: Option<bool>,
     },
 }
@@ -66,10 +63,10 @@ pub enum ExecuteMsg {
     /// before the offer is accepted by other market participants.
     CloseLiquidityRequest {},
 
-    /// Allows a liquidity provider (which could be an individual or 
+    /// Allows a liquidity provider (which could be an individual or
     /// an LP_GROUP contract to accept a liquidity request option.
-    AcceptLRO {
-        is_contract_user: Option<bool>,
+    AcceptLiquidityRequest {
+        is_lp_group: Option<bool>,
     },
 
     // Allows the vault owner(s) to claim delegator rewards

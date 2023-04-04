@@ -85,3 +85,13 @@ pub fn has_open_liquidity_request(deps: &DepsMut) -> StdResult<bool> {
     let data = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?;
     Ok(data.is_some())
 }
+
+pub fn get_amount_for_denom(funds: &[Coin], denom_str: String) -> StdResult<Uint128> {
+    let amount: Uint128 = funds
+        .iter()
+        .filter(|c| c.denom == denom_str)
+        .map(|c| c.amount)
+        .sum();
+
+    Ok(amount)
+}
