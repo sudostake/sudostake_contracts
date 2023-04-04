@@ -4,15 +4,15 @@ use crate::{
 };
 use cosmwasm_std::{Addr, DepsMut};
 
-// The optional bool Indicates if there is an open liquidity request option on the vault
-// which may have already been funded or pending funding
+// The optional bool Indicates if there is an open liquidity request on the vault
+// which may have already have an active lender or is pending funding
 #[derive(PartialEq)]
 pub enum ActionTypes {
     Delegate(bool),
     Redelegate,
     Undelegate(bool),
-    OpenLRO(bool),
-    ClosePendingLRO(bool),
+    OpenLiquidityRequest(bool),
+    CloseLiquidityRequest(bool),
     WithdrawBalance,
     TransferOwnership,
     AcceptLRO,
@@ -22,12 +22,13 @@ pub enum ActionTypes {
     Vote(bool),
 }
 
+// Applies to the owner of the vault
 const OWNER_AUTHORIZATIONS: [ActionTypes; 11] = [
     ActionTypes::Delegate(false),
     ActionTypes::Redelegate,
     ActionTypes::Undelegate(false),
-    ActionTypes::OpenLRO(false),
-    ActionTypes::ClosePendingLRO(true),
+    ActionTypes::OpenLiquidityRequest(false),
+    ActionTypes::CloseLiquidityRequest(true),
     ActionTypes::WithdrawBalance,
     ActionTypes::TransferOwnership,
     ActionTypes::ClaimDelegatorRewards,
@@ -36,6 +37,7 @@ const OWNER_AUTHORIZATIONS: [ActionTypes; 11] = [
     ActionTypes::Vote(false),
 ];
 
+// Applies to the active lenders on the vault
 const LENDER_AUTHORIZATIONS: [ActionTypes; 4] = [
     ActionTypes::ClaimDelegatorRewards,
     ActionTypes::LiquidateCollateral,
@@ -43,7 +45,7 @@ const LENDER_AUTHORIZATIONS: [ActionTypes; 4] = [
     ActionTypes::Vote(true),
 ];
 
-// There is an activeliquidity requestthat does not yet have a lender
+// Applies to all users trying to lend to the open liquidity request option
 const OPEN_AUTHORIZATIONS: [ActionTypes; 1] = [ActionTypes::AcceptLRO];
 
 pub fn authorize(

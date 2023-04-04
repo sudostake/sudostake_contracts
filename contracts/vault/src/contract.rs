@@ -5,7 +5,7 @@ use crate::helpers::{
     verify_validator_is_active,
 };
 use crate::msg::{ExecuteMsg, InfoResponse, InstantiateMsg, LiquidityRequestOptionMsg, QueryMsg};
-use crate::state::{ActiveOption, Config, OPEN_LIQUIDITY_REQUEST, CONFIG};
+use crate::state::{ActiveOption, Config, CONFIG, OPEN_LIQUIDITY_REQUEST};
 use cosmwasm_std::{
     attr, entry_point, to_binary, Binary, Coin, Deps, DepsMut, DistributionMsg, Env, MessageInfo,
     Response, StakingMsg, StdResult, Uint128, VoteOption,
@@ -66,21 +66,21 @@ pub fn execute(
             )?;
             execute_undelegate(deps, _env, &_info, validator, amount)
         }
-        ExecuteMsg::OpenLRO { option } => {
+        ExecuteMsg::OpenLiquidityRequest { option } => {
             authorize(
                 &deps,
                 _info.sender.clone(),
-                ActionTypes::OpenLRO(has_open_liquidity_request(&deps)?),
+                ActionTypes::OpenLiquidityRequest(has_open_liquidity_request(&deps)?),
             )?;
             execute_open_liquidity_request(deps, _env, option)
         }
-        ExecuteMsg::ClosePendingLRO {} => {
+        ExecuteMsg::CloseLiquidityRequest {} => {
             authorize(
                 &deps,
                 _info.sender.clone(),
-                ActionTypes::ClosePendingLRO(has_open_liquidity_request(&deps)?),
+                ActionTypes::CloseLiquidityRequest(has_open_liquidity_request(&deps)?),
             )?;
-            execute_close_pending_lro(deps, _env, &_info)
+            execute_close_liquidity_request(deps)
         }
         ExecuteMsg::Vote { proposal_id, vote } => {
             authorize(
@@ -125,7 +125,7 @@ pub fn execute(
 
         ExecuteMsg::AcceptLRO { is_contract_user } => {
             authorize(&deps, _info.sender.clone(), ActionTypes::AcceptLRO {})?;
-            execute_accept_lro(deps, _env, &_info, is_contract_user)
+            execute_accept_liquidity_request(deps, _env, &_info, is_contract_user)
         }
 
         ExecuteMsg::RepayLoan {} => {
@@ -245,7 +245,8 @@ pub fn execute_open_liquidity_request(
     env: Env,
     option: LiquidityRequestOptionMsg,
 ) -> Result<Response, ContractError> {
-    // Validate liquidity request option
+    // Validate liquidity request option to ensue that the correct data
+    // was sent by the caller
     match option.clone() {
         LiquidityRequestOptionMsg::FixedInterestRental {
             requested_amount,
@@ -300,18 +301,23 @@ pub fn execute_open_liquidity_request(
     Ok(Response::new().add_attributes(vec![attr("method", "open_liquidity_request")]))
 }
 
-pub fn execute_close_pending_lro(
-    deps: DepsMut,
-    env: Env,
-    info: &MessageInfo,
-) -> Result<Response, ContractError> {
-    // if active liquidity reqest already has a lender connected, we return error
-    // else we clear the pending liquidity request
+pub fn execute_close_liquidity_request(deps: DepsMut) -> Result<Response, ContractError> {
+    // Check if liquidity reqest already has a lender connected
+    let liquidity_request = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?.unwrap();
+    if liquidity_request.lender.is_some() {
+        return Err(ContractError::Unauthorized {});
+    }
+
+    // Clear the pending liquidity request
+    OPEN_LIQUIDITY_REQUEST.update(deps.storage, |mut _data| -> Result<_, ContractError> {
+        Ok(None)
+    })?;
+
     // respond
-    Ok(Response::default())
+    Ok(Response::new().add_attributes(vec![attr("method", "close_pending_liquidity_request")]))
 }
 
-pub fn execute_accept_lro(
+pub fn execute_accept_liquidity_request(
     deps: DepsMut,
     env: Env,
     info: &MessageInfo,

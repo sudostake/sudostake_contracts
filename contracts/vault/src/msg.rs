@@ -58,13 +58,13 @@ pub enum ExecuteMsg {
     },
 
     /// Allows the vault owner to open a liquidity request option
-    OpenLRO {
+    OpenLiquidityRequest {
         option: LiquidityRequestOptionMsg,
     },
 
     /// Allows the vault owner to close a liquidity request option
     /// before the offer is accepted by other market participants.
-    ClosePendingLRO {},
+    CloseLiquidityRequest {},
 
     /// Allows a liquidity provider (which could be an individual or 
     /// an LP_GROUP contract to accept a liquidity request option.
