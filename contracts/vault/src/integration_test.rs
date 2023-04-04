@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        msg::{ExecuteMsg, InstantiateMsg, QueryMsg},
-        state::Config,
+        msg::{ExecuteMsg, InfoResponse, InstantiateMsg, LiquidityRequestOptionMsg, QueryMsg},
+        state::{ActiveOption, Config},
     };
     use cosmwasm_std::{testing::mock_env, Addr, Coin, Decimal, Empty, Uint128, Validator};
     use cw_multi_test::{App, AppBuilder, Contract, ContractWrapper, Executor, StakingInfo};
@@ -115,9 +115,9 @@ mod tests {
         template_contract_addr
     }
 
-    fn get_vault_config(app: &mut App, contract_address: &Addr) -> Config {
-        let msg = QueryMsg::Config {};
-        let result: Config = app.wrap().query_wasm_smart(contract_address, &msg).unwrap();
+    fn get_vault_info(app: &mut App, contract_address: &Addr) -> InfoResponse {
+        let msg = QueryMsg::Info {};
+        let result: InfoResponse = app.wrap().query_wasm_smart(contract_address, &msg).unwrap();
 
         result
     }
@@ -125,14 +125,14 @@ mod tests {
     #[test]
     fn test_instantiate() {
         let mut app = mock_app();
-        let amm_addr = instantiate_vault(&mut app);
+        let vault_c_addr = instantiate_vault(&mut app);
 
         // Query for the contract info to assert
         // that all important data was indeed saved
-        let info = get_vault_config(&mut app, &amm_addr);
+        let info = get_vault_info(&mut app, &vault_c_addr);
 
         assert_eq!(
-            info,
+            info.config,
             Config {
                 owner: Addr::unchecked(USER),
                 acc_manager: Addr::unchecked(USER),
@@ -522,6 +522,345 @@ mod tests {
                 denom: STAKING_DENOM.to_string(),
                 amount: Uint128::new(2_00_000)
             }
+        );
+    }
+
+    #[test]
+    fn test_open_liquidity_request_fixed_term_loan() {
+        // Step 1
+        // Instantiate contract instance
+        // ------------------------------------------------------------------------------
+        let mut router = mock_app();
+        let vault_c_addr = instantiate_vault(&mut router);
+
+        // Step 2
+        // Delegate to VALIDATOR_ONE_ADDRESS
+        // ------------------------------------------------------------------------------
+        let amount = Uint128::new(1_000_000);
+        let delegate_msg = ExecuteMsg::Delegate {
+            validator: VALIDATOR_ONE_ADDRESS.to_string(),
+            amount,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &delegate_msg,
+                &[Coin {
+                    denom: STAKING_DENOM.into(),
+                    amount,
+                }],
+            )
+            .unwrap();
+
+        // Step 3
+        // Test error case ContractError::Unauthorized {}
+        // due to wrong owner
+        // ------------------------------------------------------------------------------
+        let wrong_owner = Addr::unchecked("WRONG_OWNER");
+        let open_liquidity_request_msg = ExecuteMsg::OpenLRO {
+            option: crate::msg::LiquidityRequestOptionMsg::FixedTermLoan {
+                requested_amount: Coin {
+                    denom: IBC_DENOM_1.to_string(),
+                    amount,
+                },
+                collateral_amount: amount,
+                duration_in_seconds: 60u64,
+                can_claim_rewards: None,
+                is_lp_group: None,
+                can_cast_vote: None,
+            },
+        };
+        router
+            .execute_contract(
+                wrong_owner,
+                vault_c_addr.clone(),
+                &open_liquidity_request_msg,
+                &[],
+            )
+            .unwrap_err();
+
+        // Step 4
+        // Test error case ContractError::InvalidLiquidityRequestOption {}
+        // ------------------------------------------------------------------------------
+        let open_liquidity_request_msg = ExecuteMsg::OpenLRO {
+            option: crate::msg::LiquidityRequestOptionMsg::FixedTermLoan {
+                requested_amount: Coin {
+                    denom: IBC_DENOM_1.to_string(),
+                    amount: Uint128::zero(),
+                },
+                collateral_amount: Uint128::zero(),
+                duration_in_seconds: 0u64,
+                can_claim_rewards: None,
+                is_lp_group: None,
+                can_cast_vote: None,
+            },
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &open_liquidity_request_msg,
+                &[],
+            )
+            .unwrap_err();
+
+        // Step 5
+        // Create a valid liquidity request
+        // ------------------------------------------------------------------------------
+        let duration_in_seconds = 60u64;
+        let option = LiquidityRequestOptionMsg::FixedTermLoan {
+            requested_amount: Coin {
+                denom: IBC_DENOM_1.to_string(),
+                amount,
+            },
+            collateral_amount: amount,
+            duration_in_seconds,
+            can_claim_rewards: None,
+            is_lp_group: None,
+            can_cast_vote: None,
+        };
+
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &ExecuteMsg::OpenLRO {
+                    option: option.clone(),
+                },
+                &[],
+            )
+            .unwrap();
+
+        // Step 6
+        // Test error case ContractError::Unauthorized {}
+        // due to already existing liquidity request
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &open_liquidity_request_msg,
+                &[],
+            )
+            .unwrap_err();
+
+        // Step 7
+        // Verify that the correct info for the liquidity request was stored
+        // ------------------------------------------------------------------------------
+        let info = get_vault_info(&mut router, &vault_c_addr);
+
+        assert_eq!(
+            info.liquidity_request,
+            Some(ActiveOption {
+                lender: None,
+                state: None,
+                msg: option
+            })
+        );
+    }
+
+    #[test]
+    fn test_open_liquidity_request_fixed_interest_rental() {
+        // Step 1
+        // Instantiate contract instance
+        // ------------------------------------------------------------------------------
+        let mut router = mock_app();
+        let vault_c_addr = instantiate_vault(&mut router);
+
+        // Step 2
+        // Delegate to VALIDATOR_ONE_ADDRESS
+        // ------------------------------------------------------------------------------
+        let amount = Uint128::new(1_000_000);
+        let delegate_msg = ExecuteMsg::Delegate {
+            validator: VALIDATOR_ONE_ADDRESS.to_string(),
+            amount,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &delegate_msg,
+                &[Coin {
+                    denom: STAKING_DENOM.into(),
+                    amount,
+                }],
+            )
+            .unwrap();
+
+        // Step 3
+        // Test error case ContractError::InvalidLiquidityRequestOption {}
+        // ------------------------------------------------------------------------------
+        let open_liquidity_request_msg = ExecuteMsg::OpenLRO {
+            option: crate::msg::LiquidityRequestOptionMsg::FixedInterestRental {
+                requested_amount: Coin {
+                    denom: IBC_DENOM_1.to_string(),
+                    amount: Uint128::zero(),
+                },
+                claimable_tokens: Uint128::zero(),
+                is_lp_group: None,
+                can_cast_vote: None,
+            },
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &open_liquidity_request_msg,
+                &[],
+            )
+            .unwrap_err();
+
+        // Step 4
+        // Create a valid liquidity request
+        // ------------------------------------------------------------------------------
+        let option = LiquidityRequestOptionMsg::FixedInterestRental {
+            requested_amount: Coin {
+                denom: IBC_DENOM_1.to_string(),
+                amount,
+            },
+            claimable_tokens: amount,
+            is_lp_group: None,
+            can_cast_vote: None,
+        };
+
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &ExecuteMsg::OpenLRO {
+                    option: option.clone(),
+                },
+                &[],
+            )
+            .unwrap();
+
+        // Step 6
+        // Test error case ContractError::Unauthorized {}
+        // due to already existing liquidity request
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &open_liquidity_request_msg,
+                &[],
+            )
+            .unwrap_err();
+
+        // Step 7
+        // Verify that the correct info for theliquidity requestwas stored
+        // ------------------------------------------------------------------------------
+        let info = get_vault_info(&mut router, &vault_c_addr);
+        assert_eq!(
+            info.liquidity_request,
+            Some(ActiveOption {
+                lender: None,
+                state: None,
+                msg: option,
+            })
+        );
+    }
+
+    #[test]
+    fn test_open_liquidity_request_fixed_term_rental() {
+        // Step 1
+        // Instantiate contract instance
+        // ------------------------------------------------------------------------------
+        let mut router = mock_app();
+        let vault_c_addr = instantiate_vault(&mut router);
+
+        // Step 2
+        // Delegate to VALIDATOR_ONE_ADDRESS
+        // ------------------------------------------------------------------------------
+        let amount = Uint128::new(1_000_000);
+        let delegate_msg = ExecuteMsg::Delegate {
+            validator: VALIDATOR_ONE_ADDRESS.to_string(),
+            amount,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &delegate_msg,
+                &[Coin {
+                    denom: STAKING_DENOM.into(),
+                    amount,
+                }],
+            )
+            .unwrap();
+
+        // Step 3
+        // Test error case ContractError::InvalidLiquidityRequestOption {}
+        // ------------------------------------------------------------------------------
+        let open_liquidity_request_msg = ExecuteMsg::OpenLRO {
+            option: crate::msg::LiquidityRequestOptionMsg::FixedTermRental {
+                requested_amount: Coin {
+                    denom: IBC_DENOM_1.to_string(),
+                    amount: Uint128::zero(),
+                },
+                duration_in_seconds: 0u64,
+                is_lp_group: None,
+                can_cast_vote: None,
+            },
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &open_liquidity_request_msg,
+                &[],
+            )
+            .unwrap_err();
+
+        // Step 4
+        // Create a valid liquidity request
+        // ------------------------------------------------------------------------------
+        let option = LiquidityRequestOptionMsg::FixedTermRental {
+            requested_amount: Coin {
+                denom: IBC_DENOM_1.to_string(),
+                amount,
+            },
+            duration_in_seconds: 60u64,
+            is_lp_group: None,
+            can_cast_vote: None,
+        };
+
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &ExecuteMsg::OpenLRO {
+                    option: option.clone(),
+                },
+                &[],
+            )
+            .unwrap();
+
+        // Step 6
+        // Test error case ContractError::Unauthorized {}
+        // due to already existing liquidity request
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &open_liquidity_request_msg,
+                &[],
+            )
+            .unwrap_err();
+
+        // Step 7
+        // Verify that the correct info for theliquidity requestwas stored
+        // ------------------------------------------------------------------------------
+        let info = get_vault_info(&mut router, &vault_c_addr);
+        assert_eq!(
+            info.liquidity_request,
+            Some(ActiveOption {
+                lender: None,
+                state: None,
+                msg: option
+            })
         );
     }
 }

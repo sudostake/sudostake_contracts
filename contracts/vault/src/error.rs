@@ -15,6 +15,9 @@ pub enum ContractError {
     #[error("ValidatorIsInactive")]
     ValidatorIsInactive { validator: String },
 
+    #[error("InvalidLiquidityRequestOption")]
+    InvalidLiquidityRequestOption {},
+
     #[error("MaxUndelegateAmountExceeded: amount: {amount:?}, validator_delegation: {validator_delegation:?}")]
     MaxUndelegateAmountExceeded {
         amount: Uint128,

@@ -1,4 +1,4 @@
-use crate::{state::ACTIVE_LRO, ContractError};
+use crate::{state::OPEN_LIQUIDITY_REQUEST, ContractError};
 use cosmwasm_std::{Addr, BankMsg, Coin, CosmosMsg, DepsMut, Env, StdResult, Uint128};
 
 pub fn verify_validator_is_active(deps: &DepsMut, validator: &str) -> Result<(), ContractError> {
@@ -36,6 +36,17 @@ pub fn get_available_staking_balace(
     })
 }
 
+pub fn query_total_delegations(deps: &DepsMut, env: &Env) -> StdResult<Uint128> {
+    let total = deps
+        .querier
+        .query_all_delegations(env.contract.address.clone())?
+        .iter()
+        .map(|d| d.amount.amount)
+        .sum();
+
+    Ok(total)
+}
+
 pub fn validate_amount_to_delegate(
     env: &Env,
     deps: &DepsMut,
@@ -70,7 +81,7 @@ pub fn get_bank_transfer_to_msg(recipient: &Addr, denom: &str, amount: Uint128) 
     transfer_bank_cosmos_msg
 }
 
-pub fn has_active_lro(deps: &DepsMut) -> StdResult<bool> {
-    let active_lro = ACTIVE_LRO.load(deps.storage)?;
-    Ok(active_lro.is_some())
+pub fn has_open_liquidity_request(deps: &DepsMut) -> StdResult<bool> {
+    let data = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?;
+    Ok(data.is_some())
 }

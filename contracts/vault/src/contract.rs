@@ -1,8 +1,11 @@
-use crate::authorisation::{ActionTypes, _authorize};
+use crate::authorisation::{authorize, ActionTypes};
 use crate::error::ContractError;
-use crate::helpers::{has_active_lro, validate_amount_to_delegate, verify_validator_is_active};
-use crate::msg::{ExecuteMsg, InstantiateMsg, LiquidityRequestOptionMsg, QueryMsg};
-use crate::state::{Config, ACTIVE_LRO, CONFIG};
+use crate::helpers::{
+    has_open_liquidity_request, query_total_delegations, validate_amount_to_delegate,
+    verify_validator_is_active,
+};
+use crate::msg::{ExecuteMsg, InfoResponse, InstantiateMsg, LiquidityRequestOptionMsg, QueryMsg};
+use crate::state::{ActiveOption, Config, OPEN_LIQUIDITY_REQUEST, CONFIG};
 use cosmwasm_std::{
     attr, entry_point, to_binary, Binary, Coin, Deps, DepsMut, DistributionMsg, Env, MessageInfo,
     Response, StakingMsg, StdResult, Uint128, VoteOption,
@@ -31,8 +34,8 @@ pub fn instantiate(
     // Save contract state
     CONFIG.save(deps.storage, &Config { owner, acc_manager })?;
 
-    // Init ACTIVE_LRO to None
-    ACTIVE_LRO.save(deps.storage, &None)?;
+    // Init OPEN_LIQUIDITY_REQUEST to None
+    OPEN_LIQUIDITY_REQUEST.save(deps.storage, &None)?;
 
     // response
     Ok(Response::new().add_attribute("method", "instantiate"))
@@ -46,91 +49,92 @@ pub fn execute(
     _msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match _msg {
-        // Vault owner operated functions
         ExecuteMsg::Delegate { validator, amount } => {
-            _authorize(
+            authorize(
                 &deps,
                 _info.sender.clone(),
-                ActionTypes::Delegate(has_active_lro(&deps)?),
+                ActionTypes::Delegate(has_open_liquidity_request(&deps)?),
             )?;
             execute_delegate(deps, _env, &_info, validator, amount)
         }
-        ExecuteMsg::Redelegate {
-            src_validator,
-            dst_validator,
-            amount,
-        } => {
-            _authorize(&deps, _info.sender.clone(), ActionTypes::Redelegate {})?;
-            execute_redelegate(deps, _env, &_info, src_validator, dst_validator, amount)
-        }
+
         ExecuteMsg::Undelegate { validator, amount } => {
-            _authorize(
+            authorize(
                 &deps,
                 _info.sender.clone(),
-                ActionTypes::Undelegate(has_active_lro(&deps)?),
+                ActionTypes::Undelegate(has_open_liquidity_request(&deps)?),
             )?;
             execute_undelegate(deps, _env, &_info, validator, amount)
         }
         ExecuteMsg::OpenLRO { option } => {
-            _authorize(
+            authorize(
                 &deps,
                 _info.sender.clone(),
-                ActionTypes::OpenLRO(has_active_lro(&deps)?),
+                ActionTypes::OpenLRO(has_open_liquidity_request(&deps)?),
             )?;
-            execute_open_lro(deps, _env, &_info, option)
+            execute_open_liquidity_request(deps, _env, option)
         }
         ExecuteMsg::ClosePendingLRO {} => {
-            _authorize(&deps, _info.sender.clone(), ActionTypes::ClosePendingLRO {})?;
-            execute_close_pending_lro(deps, _env, &_info)
-        }
-        ExecuteMsg::WithdrawBalance { to_address, funds } => {
-            _authorize(&deps, _info.sender.clone(), ActionTypes::WithdrawBalance {})?;
-            execute_withdraw(deps, _env, &_info, to_address, funds)
-        }
-
-        ExecuteMsg::TransferOwnership { to_address } => {
-            _authorize(
+            authorize(
                 &deps,
                 _info.sender.clone(),
-                ActionTypes::TransferOwnership {},
+                ActionTypes::ClosePendingLRO(has_open_liquidity_request(&deps)?),
             )?;
-            execute_transfer_ownership(deps, _env, &_info, to_address)
+            execute_close_pending_lro(deps, _env, &_info)
         }
-
-        // Lender operated functions
-        ExecuteMsg::AcceptLRO { is_contract_user } => {
-            _authorize(&deps, _info.sender.clone(), ActionTypes::AcceptLRO {})?;
-            execute_accept_lro(deps, _env, &_info, is_contract_user)
+        ExecuteMsg::Vote { proposal_id, vote } => {
+            authorize(
+                &deps,
+                _info.sender.clone(),
+                ActionTypes::Vote(has_open_liquidity_request(&deps)?),
+            )?;
+            execute_vote(deps, _env, &_info, proposal_id, vote)
         }
-
-        // Vault owner + lender operated functions
         ExecuteMsg::ClaimDelegatorRewards {} => {
-            _authorize(
+            authorize(
                 &deps,
                 _info.sender.clone(),
                 ActionTypes::ClaimDelegatorRewards {},
             )?;
-            execute_claim_delegator_rewards(deps, _env, &_info)
+            execute_claim_delegator_rewards(deps, _env)
         }
         ExecuteMsg::LiquidateCollateral {} => {
-            _authorize(
+            authorize(
                 &deps,
                 _info.sender.clone(),
                 ActionTypes::LiquidateCollateral {},
             )?;
             execute_liquidate_collateral(deps, _env, &_info)
         }
-        ExecuteMsg::RepayLoan {} => {
-            _authorize(&deps, _info.sender.clone(), ActionTypes::RepayLoan {})?;
-            execute_repay_loan(deps, _env, &_info)
-        }
-        ExecuteMsg::Vote { proposal_id, vote } => {
-            _authorize(
+        ExecuteMsg::TransferOwnership { to_address } => {
+            authorize(
                 &deps,
                 _info.sender.clone(),
-                ActionTypes::Vote(has_active_lro(&deps)?),
+                ActionTypes::TransferOwnership {},
             )?;
-            execute_vote(deps, _env, &_info, proposal_id, vote)
+            execute_transfer_ownership(deps, _env, &_info, to_address)
+        }
+        ExecuteMsg::Redelegate {
+            src_validator,
+            dst_validator,
+            amount,
+        } => {
+            authorize(&deps, _info.sender.clone(), ActionTypes::Redelegate {})?;
+            execute_redelegate(deps, _env, &_info, src_validator, dst_validator, amount)
+        }
+
+        ExecuteMsg::AcceptLRO { is_contract_user } => {
+            authorize(&deps, _info.sender.clone(), ActionTypes::AcceptLRO {})?;
+            execute_accept_lro(deps, _env, &_info, is_contract_user)
+        }
+
+        ExecuteMsg::RepayLoan {} => {
+            authorize(&deps, _info.sender.clone(), ActionTypes::RepayLoan {})?;
+            execute_repay_loan(deps, _env, &_info)
+        }
+        ExecuteMsg::WithdrawBalance { to_address, funds } => {
+            authorize(&deps, _info.sender.clone(), ActionTypes::WithdrawBalance {})?;
+            execute_withdraw_balance(deps, _env, &_info, to_address, funds)
         }
     }
 }
@@ -236,11 +240,89 @@ pub fn execute_undelegate(
     ]))
 }
 
-pub fn execute_claim_delegator_rewards(
+pub fn execute_open_liquidity_request(
+    deps: DepsMut,
+    env: Env,
+    option: LiquidityRequestOptionMsg,
+) -> Result<Response, ContractError> {
+    // Validate liquidity request option
+    match option.clone() {
+        LiquidityRequestOptionMsg::FixedInterestRental {
+            requested_amount,
+            claimable_tokens,
+            is_lp_group: _,
+            can_cast_vote: _,
+        } => {
+            if requested_amount.amount.is_zero() || claimable_tokens.is_zero() {
+                return Err(ContractError::InvalidLiquidityRequestOption {});
+            }
+        }
+
+        LiquidityRequestOptionMsg::FixedTermRental {
+            requested_amount,
+            duration_in_seconds,
+            is_lp_group: _,
+            can_cast_vote: _,
+        } => {
+            if requested_amount.amount.is_zero() || duration_in_seconds == 0u64 {
+                return Err(ContractError::InvalidLiquidityRequestOption {});
+            }
+        }
+
+        LiquidityRequestOptionMsg::FixedTermLoan {
+            requested_amount,
+            duration_in_seconds,
+            collateral_amount,
+            can_claim_rewards: _,
+            is_lp_group: _,
+            can_cast_vote: _,
+        } => {
+            if query_total_delegations(&deps, &env)? < collateral_amount
+                || requested_amount.amount.is_zero()
+                || duration_in_seconds == 0u64
+            {
+                return Err(ContractError::InvalidLiquidityRequestOption {});
+            }
+        }
+    };
+
+    // Save liquidity request to state
+    OPEN_LIQUIDITY_REQUEST.save(
+        deps.storage,
+        &Some(ActiveOption {
+            lender: None,
+            state: None,
+            msg: option,
+        }),
+    )?;
+
+    // Respond
+    Ok(Response::new().add_attributes(vec![attr("method", "open_liquidity_request")]))
+}
+
+pub fn execute_close_pending_lro(
     deps: DepsMut,
     env: Env,
     info: &MessageInfo,
 ) -> Result<Response, ContractError> {
+    // if active liquidity reqest already has a lender connected, we return error
+    // else we clear the pending liquidity request
+    // respond
+    Ok(Response::default())
+}
+
+pub fn execute_accept_lro(
+    deps: DepsMut,
+    env: Env,
+    info: &MessageInfo,
+    is_contract_user: Option<bool>,
+) -> Result<Response, ContractError> {
+    // TODO implement this
+    // respond
+    Ok(Response::default())
+}
+
+pub fn execute_claim_delegator_rewards(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
     // Update distribute_msgs and total_rewards_to_claim
     let mut distribute_msgs = vec![];
     let mut total_rewards_to_claim = Uint128::new(0);
@@ -263,8 +345,7 @@ pub fn execute_claim_delegator_rewards(
         });
 
     // TODO
-    // here we distribute rewards allocations to all entities with allocations in the vault
-    // here we can also update total_staked, in case slashing or auto-unbonding
+    // here we distribute rewards allocations
 
     // respond
     Ok(Response::new()
@@ -273,38 +354,6 @@ pub fn execute_claim_delegator_rewards(
             attr("method", "claim_delegator_rewards"),
             attr("total_rewards_to_claim", total_rewards_to_claim.to_string()),
         ]))
-}
-
-pub fn execute_open_lro(
-    deps: DepsMut,
-    env: Env,
-    info: &MessageInfo,
-    option: LiquidityRequestOptionMsg,
-) -> Result<Response, ContractError> {
-    // TODO implement this
-    // respond
-    Ok(Response::default())
-}
-
-pub fn execute_close_pending_lro(
-    deps: DepsMut,
-    env: Env,
-    info: &MessageInfo,
-) -> Result<Response, ContractError> {
-    // TODO implement this˝
-    // respond
-    Ok(Response::default())
-}
-
-pub fn execute_accept_lro(
-    deps: DepsMut,
-    env: Env,
-    info: &MessageInfo,
-    is_contract_user: Option<bool>,
-) -> Result<Response, ContractError> {
-    // TODO implement this˝
-    // respond
-    Ok(Response::default())
 }
 
 pub fn execute_liquidate_collateral(
@@ -327,7 +376,7 @@ pub fn execute_repay_loan(
     Ok(Response::default())
 }
 
-pub fn execute_withdraw(
+pub fn execute_withdraw_balance(
     deps: DepsMut,
     env: Env,
     info: &MessageInfo,
@@ -366,11 +415,15 @@ pub fn execute_vote(
 #[entry_point]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        QueryMsg::Config {} => to_binary(&query_config(deps)?),
+        QueryMsg::Info {} => to_binary(&query_info(deps)?),
     }
 }
 
-pub fn query_config(_deps: Deps) -> StdResult<Config> {
+pub fn query_info(_deps: Deps) -> StdResult<InfoResponse> {
     let config = CONFIG.load(_deps.storage)?;
-    Ok(config)
+    let liquidity_request = OPEN_LIQUIDITY_REQUEST.load(_deps.storage)?;
+    Ok(InfoResponse {
+        config,
+        liquidity_request,
+    })
 }

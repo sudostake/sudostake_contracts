@@ -1,19 +1,18 @@
-use cosmwasm_std::{Addr, DepsMut};
-
 use crate::{
-    state::{ACTIVE_LRO, CONFIG},
+    state::{OPEN_LIQUIDITY_REQUEST, CONFIG},
     ContractError,
 };
+use cosmwasm_std::{Addr, DepsMut};
 
+// The optional bool Indicates if there is an open liquidity request option on the vault
+// which may have already been funded or pending funding
 #[derive(PartialEq)]
-/// The optional bool argument signifies weather the action
-/// is available when there is an active lro
 pub enum ActionTypes {
     Delegate(bool),
     Redelegate,
     Undelegate(bool),
     OpenLRO(bool),
-    ClosePendingLRO,
+    ClosePendingLRO(bool),
     WithdrawBalance,
     TransferOwnership,
     AcceptLRO,
@@ -28,7 +27,7 @@ const OWNER_AUTHORIZATIONS: [ActionTypes; 11] = [
     ActionTypes::Redelegate,
     ActionTypes::Undelegate(false),
     ActionTypes::OpenLRO(false),
-    ActionTypes::ClosePendingLRO,
+    ActionTypes::ClosePendingLRO(true),
     ActionTypes::WithdrawBalance,
     ActionTypes::TransferOwnership,
     ActionTypes::ClaimDelegatorRewards,
@@ -37,30 +36,43 @@ const OWNER_AUTHORIZATIONS: [ActionTypes; 11] = [
     ActionTypes::Vote(false),
 ];
 
-const LENDER_AUTHORIZATIONS: [ActionTypes; 5] = [
-    ActionTypes::AcceptLRO,
+const LENDER_AUTHORIZATIONS: [ActionTypes; 4] = [
     ActionTypes::ClaimDelegatorRewards,
     ActionTypes::LiquidateCollateral,
     ActionTypes::RepayLoan,
     ActionTypes::Vote(true),
 ];
 
-// ActionTypes::Delegate(helpers.has_active_lro())
-pub fn _authorize(
+// There is an activeliquidity requestthat does not yet have a lender
+const OPEN_AUTHORIZATIONS: [ActionTypes; 1] = [ActionTypes::AcceptLRO];
+
+pub fn authorize(
     deps: &DepsMut,
     caller: Addr,
     action_type: ActionTypes,
 ) -> Result<(), ContractError> {
+    // Check if the caller has owner authorizations on the vault
     let config = CONFIG.load(deps.storage)?;
-    let active_lro = ACTIVE_LRO.load(deps.storage)?;
-
     if caller.eq(&config.owner) && OWNER_AUTHORIZATIONS.contains(&action_type) {
         return Ok(());
     }
 
-    if let Some(option) = active_lro {
-        if caller.eq(&option.lender) && LENDER_AUTHORIZATIONS.contains(&action_type) {
-            return Ok(());
+    // Check if the caller has lender authorizations on the vault
+    let liquidity_request = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?;
+    if let Some(option) = liquidity_request.clone() {
+        if let Some(lender) = option.lender {
+            if caller.eq(&lender) && LENDER_AUTHORIZATIONS.contains(&action_type) {
+                return Ok(());
+            }
+        }
+    }
+
+    // Check if the caller has open authorizations on the vault
+    if let Some(option) = liquidity_request {
+        if let None = option.lender {
+            if OPEN_AUTHORIZATIONS.contains(&action_type) {
+                return Ok(());
+            }
         }
     }
 
