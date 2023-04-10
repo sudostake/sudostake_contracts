@@ -1,9 +1,6 @@
 use crate::authorisation::{authorize, ActionTypes};
 use crate::error::ContractError;
-use crate::helpers::{
-    get_amount_for_denom, has_open_liquidity_request, query_total_delegations,
-    validate_amount_to_delegate, verify_validator_is_active,
-};
+use crate::helpers;
 use crate::msg::{ExecuteMsg, InfoResponse, InstantiateMsg, LiquidityRequestOptionMsg, QueryMsg};
 use crate::state::{
     ActiveOption, Config, LiquidityRequestOptionState, CONFIG, OPEN_LIQUIDITY_REQUEST,
@@ -55,7 +52,7 @@ pub fn execute(
             authorize(
                 &deps,
                 _info.sender.clone(),
-                ActionTypes::Delegate(has_open_liquidity_request(&deps)?),
+                ActionTypes::Delegate(helpers::has_open_liquidity_request(&deps)?),
             )?;
             execute_delegate(deps, _env, &_info, validator, amount)
         }
@@ -64,7 +61,7 @@ pub fn execute(
             authorize(
                 &deps,
                 _info.sender.clone(),
-                ActionTypes::Undelegate(has_open_liquidity_request(&deps)?),
+                ActionTypes::Undelegate(helpers::has_open_liquidity_request(&deps)?),
             )?;
             execute_undelegate(deps, _env, &_info, validator, amount)
         }
@@ -72,7 +69,7 @@ pub fn execute(
             authorize(
                 &deps,
                 _info.sender.clone(),
-                ActionTypes::OpenLiquidityRequest(has_open_liquidity_request(&deps)?),
+                ActionTypes::OpenLiquidityRequest(helpers::has_open_liquidity_request(&deps)?),
             )?;
             execute_open_liquidity_request(deps, _env, option)
         }
@@ -80,7 +77,7 @@ pub fn execute(
             authorize(
                 &deps,
                 _info.sender.clone(),
-                ActionTypes::CloseLiquidityRequest(has_open_liquidity_request(&deps)?),
+                ActionTypes::CloseLiquidityRequest(helpers::has_open_liquidity_request(&deps)?),
             )?;
             execute_close_liquidity_request(deps)
         }
@@ -88,7 +85,7 @@ pub fn execute(
             authorize(
                 &deps,
                 _info.sender.clone(),
-                ActionTypes::Vote(has_open_liquidity_request(&deps)?),
+                ActionTypes::Vote(helpers::has_open_liquidity_request(&deps)?),
             )?;
             execute_vote(deps, _env, &_info, proposal_id, vote)
         }
@@ -152,11 +149,11 @@ pub fn execute_delegate(
     validator: String,
     amount: Uint128,
 ) -> Result<Response, ContractError> {
-    verify_validator_is_active(&deps, validator.as_str())?;
+    helpers::verify_validator_is_active(&deps, validator.as_str())?;
 
     // Validate amount to delegate is not above availabe contract balance
     let denom_str = deps.querier.query_bonded_denom()?;
-    validate_amount_to_delegate(&env, &deps, amount, denom_str.clone())?;
+    helpers::validate_amount_to_delegate(&env, &deps, amount, denom_str.clone())?;
 
     // Create sdk_msg for staking tokens
     let sdk_msg = StakingMsg::Delegate {
@@ -183,7 +180,7 @@ pub fn execute_redelegate(
     dst_validator: String,
     amount: Uint128,
 ) -> Result<Response, ContractError> {
-    verify_validator_is_active(&deps, dst_validator.as_str())?;
+    helpers::verify_validator_is_active(&deps, dst_validator.as_str())?;
 
     // Create sdk_msg for un-staking tokens
     let denom_str = deps.querier.query_bonded_denom()?;
@@ -278,10 +275,8 @@ pub fn execute_open_liquidity_request(
             requested_amount,
             duration_in_seconds,
             collateral_amount,
-            can_claim_rewards: _,
-            can_cast_vote: _,
         } => {
-            if query_total_delegations(&deps, &env)? < collateral_amount
+            if helpers::query_total_delegations(&deps, &env)? < collateral_amount
                 || requested_amount.amount.is_zero()
                 || duration_in_seconds == 0u64
             {
@@ -337,7 +332,8 @@ pub fn execute_accept_liquidity_request(
             can_cast_vote,
         } => {
             // verify that the lender is sending the correct requested amount
-            let input_amount = get_amount_for_denom(&info.funds, requested_amount.denom.clone())?;
+            let input_amount =
+                helpers::get_amount_for_denom(&info.funds, requested_amount.denom.clone())?;
             if requested_amount.amount != input_amount {
                 return Err(ContractError::InvalidInputAmount {
                     required: requested_amount.amount,
@@ -368,7 +364,8 @@ pub fn execute_accept_liquidity_request(
             can_cast_vote,
         } => {
             // verify that the lender is sending the correct requested amount
-            let input_amount = get_amount_for_denom(&info.funds, requested_amount.denom.clone())?;
+            let input_amount =
+                helpers::get_amount_for_denom(&info.funds, requested_amount.denom.clone())?;
             if requested_amount.amount != input_amount {
                 return Err(ContractError::InvalidInputAmount {
                     required: requested_amount.amount,
@@ -398,11 +395,10 @@ pub fn execute_accept_liquidity_request(
             requested_amount,
             duration_in_seconds,
             collateral_amount,
-            can_claim_rewards,
-            can_cast_vote,
         } => {
             // verify that the lender is sending the correct requested amount
-            let input_amount = get_amount_for_denom(&info.funds, requested_amount.denom.clone())?;
+            let input_amount =
+                helpers::get_amount_for_denom(&info.funds, requested_amount.denom.clone())?;
             if requested_amount.amount != input_amount {
                 return Err(ContractError::InvalidInputAmount {
                     required: requested_amount.amount,
@@ -416,15 +412,10 @@ pub fn execute_accept_liquidity_request(
                 option.state = Some(LiquidityRequestOptionState::FixedTermLoan {
                     requested_amount,
                     collateral_amount,
+                    is_lp_group,
                     start_time: env.block.time,
                     end_time: env.block.time.plus_seconds(duration_in_seconds),
-                    last_claim_time: if can_claim_rewards.is_some() {
-                        Some(env.block.time)
-                    } else {
-                        None
-                    },
-                    can_cast_vote,
-                    is_lp_group,
+                    processing_liquidation: None,
                 });
 
                 // update the lender info
@@ -438,11 +429,12 @@ pub fn execute_accept_liquidity_request(
     Ok(Response::new().add_attributes(vec![attr("method", "accept_liquidity_request")]))
 }
 
-// TODO implement this next
 pub fn execute_claim_delegator_rewards(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
-    // Update distribute_msgs and total_rewards_to_claim
     let mut distribute_msgs = vec![];
-    let mut total_rewards_to_claim = Uint128::new(0);
+    let mut total_rewards_claimed = Uint128::new(0);
+    let mut response = Response::new();
+
+    // Calculate total_rewards_claimed and build distribute_msgs
     deps.querier
         .query_all_delegations(env.contract.address.clone())?
         .iter()
@@ -451,29 +443,39 @@ pub fn execute_claim_delegator_rewards(deps: DepsMut, env: Env) -> Result<Respon
                 validator: d.validator.clone(),
             });
 
-            // Update total_rewards_to_claim
+            // Update total_rewards_claimed
             deps.querier
                 .query_delegation(env.contract.address.clone(), d.validator.clone())
                 .unwrap()
                 .unwrap()
                 .accumulated_rewards
                 .iter()
-                .for_each(|c| total_rewards_to_claim += c.amount);
+                .for_each(|c| total_rewards_claimed += c.amount);
         });
 
-    // TODO
-    // here we distribute rewards allocations
+    // Add distribute_msgs for claiming rewards
+    response = response.add_messages(distribute_msgs);
+
+    // Process lender claims if there is an active liquidity request on the vault
+    let liquidity_request = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?;
+    if let Some(option) = liquidity_request.clone() {
+        if option.lender.is_some() && option.state.is_some() {
+            if let Some(msg) =
+                helpers::process_lender_claims(deps, &env, option, total_rewards_claimed)?
+            {
+                // Add msg for sending claimed rewards to the lender
+                response = response.add_message(msg);
+            }
+        }
+    }
 
     // respond
-    Ok(Response::new()
-        .add_messages(distribute_msgs)
-        .add_attributes(vec![
-            attr("method", "claim_delegator_rewards"),
-            attr("total_rewards_to_claim", total_rewards_to_claim.to_string()),
-        ]))
+    Ok(response
+        .add_attribute("method", "claim_delegator_rewards")
+        .add_attribute("total_rewards_claimed", total_rewards_claimed.to_string()))
 }
 
-pub fn execute_liquidate_collateral(
+pub fn execute_repay_loan(
     deps: DepsMut,
     env: Env,
     info: &MessageInfo,
@@ -483,7 +485,7 @@ pub fn execute_liquidate_collateral(
     Ok(Response::default())
 }
 
-pub fn execute_repay_loan(
+pub fn execute_liquidate_collateral(
     deps: DepsMut,
     env: Env,
     info: &MessageInfo,

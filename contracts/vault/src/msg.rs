@@ -27,8 +27,6 @@ pub enum LiquidityRequestOptionMsg {
         requested_amount: Coin,
         collateral_amount: Uint128,
         duration_in_seconds: u64,
-        can_claim_rewards: Option<bool>,
-        can_cast_vote: Option<bool>,
     },
 }
 
@@ -72,15 +70,17 @@ pub enum ExecuteMsg {
     // Allows the vault owner(s) to claim delegator rewards
     ClaimDelegatorRewards {},
 
-    /// Allows the vault owner/lender to liquidate collateral
-    /// by unstaking the specified amount.
-    LiquidateCollateral {},
-
-    /// Allows the vault owner/lender to transfer collateral
-    /// to lender's address when funds becomes available
+    /// Allows the vault owner to repay the amount borrowed from the lender
+    /// before the expiry date stated in the option
     RepayLoan {},
 
-    /// Allows the vault owner to withdraw funds from the vault.
+    /// Allows the vault owner/lender to liquidate collateral
+    /// by unstaking the specified amount owed to the lender.
+    LiquidateCollateral {},
+
+    /// Allows the vault owner/lender to withdraw funds from the vault.
+    /// While liquidation is processing, the lender's withdrawal
+    /// is prioritized over the vault owner.
     WithdrawBalance {
         to_address: Option<String>,
         funds: Coin,

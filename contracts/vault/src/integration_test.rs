@@ -487,8 +487,6 @@ mod tests {
                 },
                 collateral_amount: amount,
                 duration_in_seconds: 60u64,
-                can_claim_rewards: None,
-                can_cast_vote: None,
             },
         };
         router
@@ -511,8 +509,6 @@ mod tests {
                 },
                 collateral_amount: Uint128::zero(),
                 duration_in_seconds: 0u64,
-                can_claim_rewards: None,
-                can_cast_vote: None,
             },
         };
         router
@@ -535,8 +531,6 @@ mod tests {
             },
             collateral_amount: amount,
             duration_in_seconds,
-            can_claim_rewards: None,
-            can_cast_vote: None,
         };
 
         router
@@ -926,8 +920,6 @@ mod tests {
             },
             collateral_amount: amount,
             duration_in_seconds,
-            can_claim_rewards: None,
-            can_cast_vote: None,
         };
 
         router
@@ -984,11 +976,10 @@ mod tests {
                         amount,
                     },
                     collateral_amount: amount,
+                    is_lp_group: None,
                     start_time: router.block_info().time,
-                    last_claim_time: None,
                     end_time: router.block_info().time.plus_seconds(duration_in_seconds),
-                    can_cast_vote: None,
-                    is_lp_group: None
+                    processing_liquidation: None
                 }),
                 msg: option
             })
@@ -1252,7 +1243,7 @@ mod tests {
     }
 
     #[test]
-    fn test_claim_delegator_rewards() {
+    fn test_claim_delegator_rewards_no_liquidity_request() {
         // Step 1
         // Instantiate contract instance
         // ------------------------------------------------------------------------------
@@ -1328,5 +1319,377 @@ mod tests {
                 amount: Uint128::new(2_00_000)
             }
         );
+    }
+
+    #[test]
+    fn test_claim_delegator_rewards_with_fixed_interest_rental() {
+        // Step 1
+        // Instantiate contract instance
+        // ------------------------------------------------------------------------------
+        let mut router = mock_app();
+        let vault_c_addr = instantiate_vault(&mut router);
+
+        // Step 2
+        // Delegate to VALIDATOR_ONE_ADDRESS
+        // ------------------------------------------------------------------------------
+        let delegated_amount = Uint128::new(1_000_000);
+        let delegate_msg = ExecuteMsg::Delegate {
+            validator: VALIDATOR_ONE_ADDRESS.to_string(),
+            amount: delegated_amount,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &delegate_msg,
+                &[Coin {
+                    denom: STAKING_DENOM.into(),
+                    amount: delegated_amount,
+                }],
+            )
+            .unwrap();
+
+        // Step 3
+        // Create a valid FixedInterestRental liquidity request
+        // ------------------------------------------------------------------------------
+        let requested_amount = Uint128::new(350_000);
+        let option = LiquidityRequestOptionMsg::FixedInterestRental {
+            requested_amount: Coin {
+                denom: IBC_DENOM_1.to_string(),
+                amount: requested_amount,
+            },
+            claimable_tokens: requested_amount,
+            can_cast_vote: None,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &ExecuteMsg::OpenLiquidityRequest {
+                    option: option.clone(),
+                },
+                &[],
+            )
+            .unwrap();
+
+        // Step 4
+        // Accept the option
+        // ------------------------------------------------------------------------------
+        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest { is_lp_group: None };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &accept_liquidity_request_msg,
+                &[Coin {
+                    denom: IBC_DENOM_1.to_string(),
+                    amount: requested_amount,
+                }],
+            )
+            .unwrap();
+
+        // Step 5
+        // fast foward the chain to a future date, where
+        // the rewards has not fully covered the claimable_tokens
+        // ------------------------------------------------------------------------------
+        let expected_claims_after_two_years = Uint128::new(200_000);
+        router.update_block(|block| block.time = block.time.plus_seconds(60 * 60 * 24 * 365 * 2));
+
+        // Step 6
+        // try claim rewards from the validator
+        // ------------------------------------------------------------------------------
+        let claim_rewards_msg = ExecuteMsg::ClaimDelegatorRewards {};
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &claim_rewards_msg,
+                &[],
+            )
+            .unwrap();
+
+        // Step 7
+        // verify to ensure vault balance is zero and lender's balance contains
+        // expected_claims_after_two_years
+        // ------------------------------------------------------------------------------
+        let vault_balance = bank_balance(&mut router, &vault_c_addr, STAKING_DENOM.into());
+        let lender_balance =
+            bank_balance(&mut router, &Addr::unchecked(USER), STAKING_DENOM.into());
+        assert_eq!(
+            vault_balance,
+            Coin {
+                denom: STAKING_DENOM.to_string(),
+                amount: Uint128::new(0)
+            }
+        );
+        assert_eq!(
+            lender_balance,
+            Coin {
+                denom: STAKING_DENOM.to_string(),
+                amount: Uint128::new(SUPPLY) - delegated_amount + expected_claims_after_two_years
+            }
+        );
+
+        // Step 8
+        // Verify that the correct info for the liquidity request
+        // was updated in the option state
+        // ------------------------------------------------------------------------------
+        let info = get_vault_info(&mut router, &vault_c_addr);
+        assert_eq!(
+            info.liquidity_request,
+            Some(ActiveOption {
+                lender: Some(Addr::unchecked(USER)),
+                state: Some(LiquidityRequestOptionState::FixedInterestRental {
+                    requested_amount: Coin {
+                        denom: IBC_DENOM_1.to_string(),
+                        amount: requested_amount,
+                    },
+                    claimable_tokens: requested_amount,
+                    already_claimed: expected_claims_after_two_years,
+                    can_cast_vote: None,
+                    is_lp_group: None
+                }),
+                msg: option
+            })
+        );
+
+        // Step 9
+        // fast foward the chain to a future date, where
+        // the rewards has fully covered the claimable_tokens
+        // ------------------------------------------------------------------------------
+        router.update_block(|block| block.time = block.time.plus_seconds(60 * 60 * 24 * 365 * 2));
+
+        // Step 10
+        // try claim rewards from the validator
+        // ------------------------------------------------------------------------------
+        let claim_rewards_msg = ExecuteMsg::ClaimDelegatorRewards {};
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &claim_rewards_msg,
+                &[],
+            )
+            .unwrap();
+
+        // Step 11
+        // verify to ensure vault balance is
+        // (2 * expected_claims_after_two_years) - requsted_amount,
+        // and the lender's balance now has the requested_amount
+        // ------------------------------------------------------------------------------
+        let vault_balance = bank_balance(&mut router, &vault_c_addr, STAKING_DENOM.into());
+        let lender_balance =
+            bank_balance(&mut router, &Addr::unchecked(USER), STAKING_DENOM.into());
+        assert_eq!(
+            vault_balance,
+            Coin {
+                denom: STAKING_DENOM.to_string(),
+                amount: (expected_claims_after_two_years + expected_claims_after_two_years)
+                    - requested_amount
+            }
+        );
+        assert_eq!(
+            lender_balance,
+            Coin {
+                denom: STAKING_DENOM.to_string(),
+                amount: Uint128::new(SUPPLY) - delegated_amount + requested_amount
+            }
+        );
+
+        // Step 12
+        // Verify that the option has been finalized
+        // ------------------------------------------------------------------------------
+        let info = get_vault_info(&mut router, &vault_c_addr);
+        assert_eq!(info.liquidity_request, None);
+    }
+
+    #[test]
+    fn test_claim_delegator_rewards_with_fixed_term_rental() {
+        // Step 1
+        // Instantiate contract instance
+        // ------------------------------------------------------------------------------
+        let mut router = mock_app();
+        let vault_c_addr = instantiate_vault(&mut router);
+
+        // Step 2
+        // Delegate to VALIDATOR_ONE_ADDRESS
+        // ------------------------------------------------------------------------------
+        let delegated_amount = Uint128::new(1_000_000);
+        let delegate_msg = ExecuteMsg::Delegate {
+            validator: VALIDATOR_ONE_ADDRESS.to_string(),
+            amount: delegated_amount,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &delegate_msg,
+                &[Coin {
+                    denom: STAKING_DENOM.into(),
+                    amount: delegated_amount,
+                }],
+            )
+            .unwrap();
+
+        // Step 3
+        // Create a valid FixedTermRental liquidity request
+        // ------------------------------------------------------------------------------
+        let requested_amount = Uint128::new(350_000);
+        let duration_in_seconds = 60 * 60 * 24 * 365 * 3;
+        let expected_rewards_after_duration = Uint128::new(300_000);
+        let option = LiquidityRequestOptionMsg::FixedTermRental {
+            requested_amount: Coin {
+                denom: IBC_DENOM_1.to_string(),
+                amount: Uint128::new(350_000),
+            },
+            duration_in_seconds,
+            can_cast_vote: None,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &ExecuteMsg::OpenLiquidityRequest {
+                    option: option.clone(),
+                },
+                &[],
+            )
+            .unwrap();
+
+        // Step 4
+        // Accept the option
+        // ------------------------------------------------------------------------------
+        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest { is_lp_group: None };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &accept_liquidity_request_msg,
+                &[Coin {
+                    denom: IBC_DENOM_1.to_string(),
+                    amount: requested_amount,
+                }],
+            )
+            .unwrap();
+
+        // Record start time
+        let start_time = router.block_info().time;
+
+        // Step 5
+        // fast foward the chain to a future date, before the end_timme
+        // ------------------------------------------------------------------------------
+        let expected_claims_after_two_years = Uint128::new(200_000);
+        let two_years = 60 * 60 * 24 * 365 * 2;
+        router.update_block(|block| block.time = block.time.plus_seconds(two_years));
+
+        // Step 6
+        // try claim rewards from the validator
+        // ------------------------------------------------------------------------------
+        let claim_rewards_msg = ExecuteMsg::ClaimDelegatorRewards {};
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &claim_rewards_msg,
+                &[],
+            )
+            .unwrap();
+
+        // Record last claim time
+        let last_claim_time = router.block_info().time;
+
+        // Step 7
+        // verify to ensure vault balance is zero and lender's balance contains
+        // expected_claims_after_two_years
+        // ------------------------------------------------------------------------------
+        let vault_balance = bank_balance(&mut router, &vault_c_addr, STAKING_DENOM.into());
+        let lender_balance =
+            bank_balance(&mut router, &Addr::unchecked(USER), STAKING_DENOM.into());
+        assert_eq!(
+            vault_balance,
+            Coin {
+                denom: STAKING_DENOM.to_string(),
+                amount: Uint128::new(0)
+            }
+        );
+        assert_eq!(
+            lender_balance,
+            Coin {
+                denom: STAKING_DENOM.to_string(),
+                amount: Uint128::new(SUPPLY) - delegated_amount + expected_claims_after_two_years
+            }
+        );
+
+        // Step 8
+        // Verify that the correct info for the liquidity request
+        // was updated in the option state
+        // ------------------------------------------------------------------------------
+        let info = get_vault_info(&mut router, &vault_c_addr);
+        assert_eq!(
+            info.liquidity_request,
+            Some(ActiveOption {
+                lender: Some(Addr::unchecked(USER)),
+                state: Some(LiquidityRequestOptionState::FixedTermRental {
+                    requested_amount: Coin {
+                        denom: IBC_DENOM_1.to_string(),
+                        amount: requested_amount,
+                    },
+                    start_time,
+                    last_claim_time,
+                    end_time: start_time.plus_seconds(duration_in_seconds),
+                    can_cast_vote: None,
+                    is_lp_group: None
+                }),
+                msg: option
+            })
+        );
+
+        // Step 9
+        // fast foward the chain to a future date greater than the end_time
+        // ------------------------------------------------------------------------------
+        router.update_block(|block| block.time = block.time.plus_seconds(two_years));
+
+        // Step 10
+        // try claim rewards from the validator
+        // ------------------------------------------------------------------------------
+        let claim_rewards_msg = ExecuteMsg::ClaimDelegatorRewards {};
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &claim_rewards_msg,
+                &[],
+            )
+            .unwrap();
+
+        // Step 11
+        // verify to ensure vault balance is
+        // (2 * expected_claims_after_two_years) - expected_rewards_after_duration,
+        // and the lender's balance now has the expected_rewards_after_duration
+        // ------------------------------------------------------------------------------
+        let vault_balance = bank_balance(&mut router, &vault_c_addr, STAKING_DENOM.into());
+        let lender_balance =
+            bank_balance(&mut router, &Addr::unchecked(USER), STAKING_DENOM.into());
+        assert_eq!(
+            vault_balance,
+            Coin {
+                denom: STAKING_DENOM.to_string(),
+                amount: (expected_claims_after_two_years + expected_claims_after_two_years)
+                    - expected_rewards_after_duration
+            }
+        );
+        assert_eq!(
+            lender_balance,
+            Coin {
+                denom: STAKING_DENOM.to_string(),
+                amount: Uint128::new(SUPPLY) - delegated_amount + expected_rewards_after_duration
+            }
+        );
+
+        // Step 12
+        // Verify that the option has been finalized
+        // ------------------------------------------------------------------------------
+        let info = get_vault_info(&mut router, &vault_c_addr);
+        assert_eq!(info.liquidity_request, None);
     }
 }
