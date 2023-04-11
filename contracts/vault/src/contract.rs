@@ -7,7 +7,7 @@ use crate::state::{
 };
 use cosmwasm_std::{
     attr, entry_point, to_binary, Binary, Coin, Deps, DepsMut, DistributionMsg, Env, MessageInfo,
-    Response, StakingMsg, StdResult, Uint128, VoteOption,
+    Response, StakingMsg, StdResult, Uint128, VoteOption, WasmMsg,
 };
 
 // contract info
@@ -132,8 +132,12 @@ pub fn execute(
         }
 
         ExecuteMsg::RepayLoan {} => {
-            authorize(&deps, _info.sender.clone(), ActionTypes::RepayLoan {})?;
-            execute_repay_loan(deps, _env, &_info)
+            authorize(
+                &deps,
+                _info.sender.clone(),
+                ActionTypes::RepayLoan(helpers::has_open_liquidity_request(&deps)?),
+            )?;
+            execute_repay_loan(deps, _env)
         }
         ExecuteMsg::WithdrawBalance { to_address, funds } => {
             authorize(&deps, _info.sender.clone(), ActionTypes::WithdrawBalance {})?;
@@ -273,6 +277,7 @@ pub fn execute_open_liquidity_request(
 
         LiquidityRequestOptionMsg::FixedTermLoan {
             requested_amount,
+            interest_amount: _,
             duration_in_seconds,
             collateral_amount,
         } => {
@@ -393,6 +398,7 @@ pub fn execute_accept_liquidity_request(
 
         LiquidityRequestOptionMsg::FixedTermLoan {
             requested_amount,
+            interest_amount,
             duration_in_seconds,
             collateral_amount,
         } => {
@@ -411,11 +417,12 @@ pub fn execute_accept_liquidity_request(
                 let mut option = data.unwrap();
                 option.state = Some(LiquidityRequestOptionState::FixedTermLoan {
                     requested_amount,
+                    interest_amount,
                     collateral_amount,
                     is_lp_group,
                     start_time: env.block.time,
                     end_time: env.block.time.plus_seconds(duration_in_seconds),
-                    processing_liquidation: None,
+                    processing_liquidation: false,
                 });
 
                 // update the lender info
@@ -475,14 +482,82 @@ pub fn execute_claim_delegator_rewards(deps: DepsMut, env: Env) -> Result<Respon
         .add_attribute("total_rewards_claimed", total_rewards_claimed.to_string()))
 }
 
-pub fn execute_repay_loan(
-    deps: DepsMut,
-    env: Env,
-    info: &MessageInfo,
-) -> Result<Response, ContractError> {
-    // TODO implement this
+pub fn execute_repay_loan(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
+    let liquidity_request = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?;
+    let mut response = Response::new();
+
+    // Check if there is an active FixedTermLoan loan on the vault where processing_liquidation is false.
+    // Then we try to use the vault's unstaked balance to payback the
+    // requested_amount + interest_amount stated in the liquidity request
+    if let Some(ActiveOption {
+        lender: Some(lender),
+        msg: _,
+        state:
+            Some(LiquidityRequestOptionState::FixedTermLoan {
+                requested_amount,
+                interest_amount,
+                collateral_amount: _,
+                is_lp_group,
+                start_time: _,
+                end_time: _,
+                processing_liquidation: false,
+            }),
+    }) = liquidity_request
+    {
+        // Check if there is enough balance to repay requested_amount + interest_amount
+        // in the denomination of requested_amount.denom
+        let repayment_amount = requested_amount.amount + interest_amount;
+        let borrowed_denom_balance = helpers::get_amount_for_denom(
+            &deps
+                .querier
+                .query_all_balances(env.contract.address.clone())?,
+            requested_amount.denom.clone(),
+        )?;
+        if borrowed_denom_balance < repayment_amount {
+            return Err(ContractError::InsufficientBalance {
+                required: Coin {
+                    amount: repayment_amount,
+                    denom: requested_amount.denom.clone(),
+                },
+                available: Coin {
+                    amount: borrowed_denom_balance,
+                    denom: requested_amount.denom.clone(),
+                },
+            });
+        }
+
+        // Add funds_transfer_msg to response
+        response = response.add_message(if is_lp_group.is_some() {
+            WasmMsg::Execute {
+                contract_addr: lender.to_string(),
+                msg: to_binary(&shared_types::ProcessPoolHook {
+                    vault_address: env.contract.address.to_string(),
+                    event: shared_types::VaultEvents::FinalizedClaim {},
+                })?,
+                funds: vec![Coin {
+                    denom: requested_amount.denom.clone(),
+                    amount: repayment_amount,
+                }],
+            }
+            .into()
+        } else {
+            helpers::get_bank_transfer_to_msg(
+                &lender,
+                &requested_amount.denom.clone(),
+                repayment_amount,
+            )
+        });
+
+        // Close option as repayment has been processed successfully
+        OPEN_LIQUIDITY_REQUEST.update(deps.storage, |mut _data| -> Result<_, ContractError> {
+            Ok(None)
+        })?;
+    } else {
+        return Err(ContractError::Unauthorized {});
+    }
+
     // respond
-    Ok(Response::default())
+    Ok(response.add_attribute("method", "repay_loan"))
 }
 
 pub fn execute_liquidate_collateral(
@@ -491,6 +566,8 @@ pub fn execute_liquidate_collateral(
     info: &MessageInfo,
 ) -> Result<Response, ContractError> {
     // TODO implement this
+    // liquidation on fixed term loans can only happen when
+    // end_time < env.block.time
     // respond
     Ok(Response::default())
 }

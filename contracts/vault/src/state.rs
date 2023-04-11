@@ -32,10 +32,11 @@ pub enum LiquidityRequestOptionState {
     FixedTermLoan {
         requested_amount: Coin,
         collateral_amount: Uint128,
+        interest_amount: Uint128,
         is_lp_group: Option<bool>,
         start_time: Timestamp,
         end_time: Timestamp,
-        processing_liquidation: Option<bool>
+        processing_liquidation: bool
     },
 }
 

@@ -1,5 +1,5 @@
 use crate::{
-    state::{OPEN_LIQUIDITY_REQUEST, CONFIG},
+    state::{CONFIG, OPEN_LIQUIDITY_REQUEST},
     ContractError,
 };
 use cosmwasm_std::{Addr, DepsMut};
@@ -18,8 +18,7 @@ pub enum ActionTypes {
     AcceptLiquidityRequest,
     ClaimDelegatorRewards,
     LiquidateCollateral,
-    RepayLoan,
-
+    RepayLoan(bool),
     // todo: update voting authorizations
     Vote(bool),
 }
@@ -31,11 +30,11 @@ const OWNER_AUTHORIZATIONS: [ActionTypes; 11] = [
     ActionTypes::Undelegate(false),
     ActionTypes::OpenLiquidityRequest(false),
     ActionTypes::CloseLiquidityRequest(true),
-    ActionTypes::WithdrawBalance,
     ActionTypes::TransferOwnership,
+    ActionTypes::RepayLoan(true),
     ActionTypes::ClaimDelegatorRewards,
     ActionTypes::LiquidateCollateral,
-    ActionTypes::RepayLoan,
+    ActionTypes::WithdrawBalance,
     ActionTypes::Vote(false),
 ];
 
@@ -43,7 +42,7 @@ const OWNER_AUTHORIZATIONS: [ActionTypes; 11] = [
 const LENDER_AUTHORIZATIONS: [ActionTypes; 4] = [
     ActionTypes::ClaimDelegatorRewards,
     ActionTypes::LiquidateCollateral,
-    ActionTypes::RepayLoan,
+    ActionTypes::WithdrawBalance,
     ActionTypes::Vote(true),
 ];
 

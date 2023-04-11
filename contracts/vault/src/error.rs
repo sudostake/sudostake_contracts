@@ -9,9 +9,6 @@ pub enum ContractError {
     #[error("Unauthorized")]
     Unauthorized {},
 
-    #[error("InsufficientBalance")]
-    InsufficientBalance { required: Coin, available: Coin },
-
     #[error("InvalidInputAmount:  required: {required:?}, received: {received:?}")]
     InvalidInputAmount {
         required: Uint128,
@@ -29,6 +26,9 @@ pub enum ContractError {
         amount: Uint128,
         validator_delegation: Uint128,
     },
+
+    #[error("InsufficientBalance: Required {required:?}, Available {available:?}")]
+    InsufficientBalance { required: Coin, available: Coin },
 
     #[error("Custom Error val: {val:?}")]
     CustomError { val: String },

@@ -485,6 +485,7 @@ mod tests {
                     denom: IBC_DENOM_1.to_string(),
                     amount,
                 },
+                interest_amount: Uint128::zero(),
                 collateral_amount: amount,
                 duration_in_seconds: 60u64,
             },
@@ -507,6 +508,7 @@ mod tests {
                     denom: IBC_DENOM_1.to_string(),
                     amount: Uint128::zero(),
                 },
+                interest_amount: Uint128::zero(),
                 collateral_amount: Uint128::zero(),
                 duration_in_seconds: 0u64,
             },
@@ -529,6 +531,7 @@ mod tests {
                 denom: IBC_DENOM_1.to_string(),
                 amount,
             },
+            interest_amount: Uint128::zero(),
             collateral_amount: amount,
             duration_in_seconds,
         };
@@ -918,10 +921,10 @@ mod tests {
                 denom: IBC_DENOM_1.to_string(),
                 amount,
             },
+            interest_amount: Uint128::zero(),
             collateral_amount: amount,
             duration_in_seconds,
         };
-
         router
             .execute_contract(
                 Addr::unchecked(USER),
@@ -947,7 +950,7 @@ mod tests {
             .unwrap_err();
 
         // Step 6
-        // Accept the option
+        // Accept the open liquidity request
         // ------------------------------------------------------------------------------
         router
             .execute_contract(
@@ -975,11 +978,12 @@ mod tests {
                         denom: IBC_DENOM_1.to_string(),
                         amount,
                     },
+                    interest_amount: Uint128::zero(),
                     collateral_amount: amount,
                     is_lp_group: None,
                     start_time: router.block_info().time,
                     end_time: router.block_info().time.plus_seconds(duration_in_seconds),
-                    processing_liquidation: None
+                    processing_liquidation: false
                 }),
                 msg: option
             })
@@ -1691,5 +1695,163 @@ mod tests {
         // ------------------------------------------------------------------------------
         let info = get_vault_info(&mut router, &vault_c_addr);
         assert_eq!(info.liquidity_request, None);
+    }
+
+    #[test]
+    fn test_repay_loan() {
+        // Step 1
+        // Instantiate contract instance
+        // ------------------------------------------------------------------------------
+        let mut router = mock_app();
+        let vault_c_addr = instantiate_vault(&mut router);
+
+        // Step 2
+        // Delegate to VALIDATOR_ONE_ADDRESS
+        // ------------------------------------------------------------------------------
+        let delegated_amount = Uint128::new(1_000_000);
+        let delegate_msg = ExecuteMsg::Delegate {
+            validator: VALIDATOR_ONE_ADDRESS.to_string(),
+            amount: delegated_amount,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &delegate_msg,
+                &[Coin {
+                    denom: STAKING_DENOM.into(),
+                    amount: delegated_amount,
+                }],
+            )
+            .unwrap();
+
+        // Step 3
+        // Try to call repay loan with ContractError::Unauthorized {}
+        // because there is no active liquidity request
+        // ------------------------------------------------------------------------------
+        let repay_loan_msg = ExecuteMsg::RepayLoan {};
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &repay_loan_msg,
+                &[],
+            )
+            .unwrap_err();
+
+        // Step 4
+        // Create a valid FixedTermLoan liquidity request
+        // ------------------------------------------------------------------------------
+        let requested_amount = Uint128::new(300_000);
+        let interest_amount = Uint128::new(30_000);
+        let duration_in_seconds = 60u64;
+        let option = LiquidityRequestOptionMsg::FixedTermLoan {
+            requested_amount: Coin {
+                denom: IBC_DENOM_1.to_string(),
+                amount: requested_amount,
+            },
+            interest_amount,
+            collateral_amount: requested_amount,
+            duration_in_seconds,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &ExecuteMsg::OpenLiquidityRequest {
+                    option: option.clone(),
+                },
+                &[],
+            )
+            .unwrap();
+
+        // Step 5
+        // Try to call repay loan with ContractError::Unauthorized {}
+        // because there is a liquidity request that has not been accepted yet
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &repay_loan_msg,
+                &[],
+            )
+            .unwrap_err();
+
+        // Step 6
+        // Accept the open liquidity request
+        // ------------------------------------------------------------------------------
+        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest { is_lp_group: None };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &accept_liquidity_request_msg,
+                &[Coin {
+                    denom: IBC_DENOM_1.to_string(),
+                    amount: requested_amount,
+                }],
+            )
+            .unwrap();
+
+        // Step 7
+        // Try to call repay loan with ContractError::InsufficientBalance {}
+        // because at this point, the vault contract still has the requested_amount
+        // sent to it by the lender when they accept the liquidity request
+        // but does not have the extra interest_amount required
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &repay_loan_msg,
+                &[],
+            )
+            .unwrap_err();
+
+        // Step 8
+        // Try to repay the loan correctly by sending the interest_amount to the contract
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &repay_loan_msg,
+                &[Coin {
+                    denom: IBC_DENOM_1.to_string(),
+                    amount: interest_amount,
+                }],
+            )
+            .unwrap();
+
+        // Step 9
+        // Verify that the option on the vault is closed,
+        // ------------------------------------------------------------------------------
+        let info = get_vault_info(&mut router, &vault_c_addr);
+        assert_eq!(info.liquidity_request, None);
+
+        // Step 10
+        // Verify that the lender got the amount paid. In this case, given the lender
+        // is still USER, then his balance for IBC_DENOM_1 should be equal SUPPLY
+        //
+        // Also verify that the vault balance for IBC_DENOM_1 is zero as the balance
+        // has been used to clear the debt
+        // ------------------------------------------------------------------------------
+        let vault_balance = bank_balance(&mut router, &vault_c_addr, IBC_DENOM_1.into());
+        let lender_balance = bank_balance(&mut router, &Addr::unchecked(USER), IBC_DENOM_1.into());
+        assert_eq!(
+            vault_balance,
+            Coin {
+                denom: IBC_DENOM_1.to_string(),
+                amount: Uint128::new(0)
+            }
+        );
+        assert_eq!(
+            lender_balance,
+            Coin {
+                denom: IBC_DENOM_1.to_string(),
+                amount: Uint128::new(SUPPLY)
+            }
+        );
     }
 }

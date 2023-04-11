@@ -25,6 +25,9 @@ pub enum LiquidityRequestOptionMsg {
     },
     FixedTermLoan {
         requested_amount: Coin,
+        /// Implicitly denominated in requested_amount.denom
+        interest_amount: Uint128,
+        /// Implicitly denominated in staked tokens
         collateral_amount: Uint128,
         duration_in_seconds: u64,
     },
