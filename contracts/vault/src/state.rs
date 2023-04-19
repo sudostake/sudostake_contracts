@@ -10,6 +10,7 @@ use crate::msg::LiquidityRequestOptionMsg;
 pub struct Config {
     pub owner: Addr,
     pub acc_manager: Addr,
+    pub liquidation_interval_in_seconds: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -36,7 +37,9 @@ pub enum LiquidityRequestOptionState {
         is_lp_group: Option<bool>,
         start_time: Timestamp,
         end_time: Timestamp,
-        processing_liquidation: bool
+        processing_liquidation: bool,
+        already_claimed: Uint128,
+        last_liquidation_date: Option<Timestamp>,
     },
 }
 

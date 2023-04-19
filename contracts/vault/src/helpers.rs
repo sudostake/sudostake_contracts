@@ -1,9 +1,10 @@
 use crate::{
-    state::{ActiveOption, LiquidityRequestOptionState, OPEN_LIQUIDITY_REQUEST},
+    state::{LiquidityRequestOptionState, OPEN_LIQUIDITY_REQUEST},
     ContractError,
 };
 use cosmwasm_std::{
-    to_binary, Addr, BankMsg, Coin, CosmosMsg, DepsMut, Env, StdError, StdResult, Uint128, WasmMsg,
+    to_binary, Addr, BankMsg, Coin, CosmosMsg, DepsMut, DistributionMsg, Env, StakingMsg, StdError,
+    StdResult, Uint128, WasmMsg,
 };
 
 pub fn verify_validator_is_active(deps: &DepsMut, validator: &str) -> Result<(), ContractError> {
@@ -102,14 +103,15 @@ pub fn get_amount_for_denom(funds: &[Coin], denom_str: String) -> StdResult<Uint
 pub fn process_lender_claims(
     deps: DepsMut,
     env: &Env,
-    liquidity_request: ActiveOption,
+    liquidity_request_state: LiquidityRequestOptionState,
+    lender: Addr,
     total_rewards_claimed: Uint128,
 ) -> Result<Option<CosmosMsg>, ContractError> {
     // Get native denom str
     let denom_str = deps.querier.query_bonded_denom()?;
 
     // Process liquidity_request variants
-    match liquidity_request.state.unwrap() {
+    match liquidity_request_state {
         LiquidityRequestOptionState::FixedInterestRental {
             requested_amount,
             can_cast_vote,
@@ -147,13 +149,13 @@ pub fn process_lender_claims(
             // Return cosmos_msg to transfer funds to the lender
             return Ok(Some(if is_lp_group.is_some() {
                 WasmMsg::Execute {
-                    contract_addr: liquidity_request.lender.unwrap().to_string(),
+                    contract_addr: lender.to_string(),
                     msg: to_binary(&shared_types::ProcessPoolHook {
                         vault_address: env.contract.address.to_string(),
-                        event: if updated_already_claimed.eq(&claimable_tokens) {
-                            shared_types::VaultEvents::FinalizedClaim {}
-                        } else {
+                        event: if updated_already_claimed < claimable_tokens {
                             shared_types::VaultEvents::ClaimedRewards {}
+                        } else {
+                            shared_types::VaultEvents::FinalizedClaim {}
                         },
                     })?,
                     funds: vec![Coin {
@@ -163,11 +165,7 @@ pub fn process_lender_claims(
                 }
                 .into()
             } else {
-                get_bank_transfer_to_msg(
-                    &liquidity_request.lender.unwrap(),
-                    &denom_str,
-                    amount_to_send_to_lender,
-                )
+                get_bank_transfer_to_msg(&lender, &denom_str, amount_to_send_to_lender)
             }));
         }
 
@@ -184,14 +182,13 @@ pub fn process_lender_claims(
                 total_rewards_claimed
             } else {
                 let duration_eligible_for_rewards = end_time.seconds() - last_claim_time.seconds();
-                let total_duration_since_last_claim =
-                    current_time.seconds() - last_claim_time.seconds();
+                let duration_since_last_claim = current_time.seconds() - last_claim_time.seconds();
 
                 // calculate the portion of the total_rewards_claimed to go to lender
                 total_rewards_claimed
                     .checked_multiply_ratio(
                         duration_eligible_for_rewards,
-                        total_duration_since_last_claim,
+                        duration_since_last_claim,
                     )
                     .map_err(|_| StdError::GenericErr {
                         msg: "error calculating amount_to_send_to_lender".to_string(),
@@ -220,7 +217,7 @@ pub fn process_lender_claims(
             // Return cosmos_msg to transfer funds to the lender
             return Ok(Some(if is_lp_group.is_some() {
                 WasmMsg::Execute {
-                    contract_addr: liquidity_request.lender.unwrap().to_string(),
+                    contract_addr: lender.to_string(),
                     msg: to_binary(&shared_types::ProcessPoolHook {
                         vault_address: env.contract.address.to_string(),
                         event: if current_time < end_time {
@@ -236,14 +233,82 @@ pub fn process_lender_claims(
                 }
                 .into()
             } else {
-                get_bank_transfer_to_msg(
-                    &liquidity_request.lender.unwrap(),
-                    &denom_str,
-                    amount_to_send_to_lender,
-                )
+                get_bank_transfer_to_msg(&lender, &denom_str, amount_to_send_to_lender)
             }));
         }
 
         _default => Ok(None),
     }
+}
+
+pub fn unbond_tokens_from_validators(
+    deps: &DepsMut,
+    env: &Env,
+    max_amount: Uint128,
+) -> Result<Option<Vec<StakingMsg>>, ContractError> {
+    let mut accumulated_unbonding_amount = Uint128::zero();
+    let mut unstaking_msgs = vec![];
+
+    // Query all delegations, and unbond enough amount to payback max_amount if available
+    deps.querier
+        .query_all_delegations(env.contract.address.clone())?
+        .iter()
+        .for_each(|d| {
+            if accumulated_unbonding_amount < max_amount {
+                let outstanding_debt = max_amount - accumulated_unbonding_amount;
+                let amount_to_unstake = if outstanding_debt < d.amount.amount {
+                    outstanding_debt
+                } else {
+                    d.amount.amount
+                };
+
+                // add unbonding msg
+                unstaking_msgs.push(StakingMsg::Undelegate {
+                    validator: d.validator.clone(),
+                    amount: Coin {
+                        denom: d.amount.denom.clone(),
+                        amount: amount_to_unstake,
+                    },
+                });
+
+                // update amount unbonded so far
+                accumulated_unbonding_amount += amount_to_unstake;
+            }
+        });
+
+    // Respond
+    Ok(if unstaking_msgs.is_empty() {
+        None
+    } else {
+        Some(unstaking_msgs)
+    })
+}
+
+pub fn calculate_total_claimed_rewards(
+    deps: &DepsMut,
+    env: &Env,
+) -> Result<(Uint128, Vec<DistributionMsg>), ContractError> {
+    let mut distribute_msgs = vec![];
+    let mut total_rewards_claimed = Uint128::new(0);
+
+    // Calculate total_rewards_claimed and build distribute_msgs
+    deps.querier
+        .query_all_delegations(env.contract.address.clone())?
+        .iter()
+        .for_each(|d| {
+            distribute_msgs.push(DistributionMsg::WithdrawDelegatorReward {
+                validator: d.validator.clone(),
+            });
+
+            // Update total_rewards_claimed
+            deps.querier
+                .query_delegation(env.contract.address.clone(), d.validator.clone())
+                .unwrap()
+                .unwrap()
+                .accumulated_rewards
+                .iter()
+                .for_each(|c| total_rewards_claimed += c.amount);
+        });
+
+    Ok((total_rewards_claimed, distribute_msgs))
 }

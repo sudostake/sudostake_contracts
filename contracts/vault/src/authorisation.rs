@@ -1,26 +1,28 @@
 use crate::{
-    state::{CONFIG, OPEN_LIQUIDITY_REQUEST},
+    state::{ActiveOption, CONFIG, OPEN_LIQUIDITY_REQUEST},
     ContractError,
 };
 use cosmwasm_std::{Addr, DepsMut};
 
-// The optional bool Indicates if there is an open liquidity request on the vault
-// which may have already have an active lender or is pending funding
+// True  = vault has an open liquidity request
+// False = vault does not have an open liquidity request
+type WithOpenLiquidityRequest = bool;
+
 #[derive(PartialEq)]
 pub enum ActionTypes {
-    Delegate(bool),
+    Delegate(WithOpenLiquidityRequest),
     Redelegate,
-    Undelegate(bool),
-    OpenLiquidityRequest(bool),
-    CloseLiquidityRequest(bool),
-    WithdrawBalance,
+    Undelegate(WithOpenLiquidityRequest),
+    OpenLiquidityRequest(WithOpenLiquidityRequest),
+    CloseLiquidityRequest(WithOpenLiquidityRequest),
+    WithdrawBalance(WithOpenLiquidityRequest),
     TransferOwnership,
     AcceptLiquidityRequest,
     ClaimDelegatorRewards,
-    LiquidateCollateral,
-    RepayLoan(bool),
+    LiquidateCollateral(WithOpenLiquidityRequest),
+    RepayLoan(WithOpenLiquidityRequest),
     // todo: update voting authorizations
-    Vote(bool),
+    Vote(WithOpenLiquidityRequest),
 }
 
 // Applies to the owner of the vault
@@ -33,16 +35,15 @@ const OWNER_AUTHORIZATIONS: [ActionTypes; 11] = [
     ActionTypes::TransferOwnership,
     ActionTypes::RepayLoan(true),
     ActionTypes::ClaimDelegatorRewards,
-    ActionTypes::LiquidateCollateral,
-    ActionTypes::WithdrawBalance,
+    ActionTypes::LiquidateCollateral(true),
+    ActionTypes::WithdrawBalance(false),
     ActionTypes::Vote(false),
 ];
 
 // Applies to the active lenders on the vault
-const LENDER_AUTHORIZATIONS: [ActionTypes; 4] = [
+const LENDER_AUTHORIZATIONS: [ActionTypes; 3] = [
     ActionTypes::ClaimDelegatorRewards,
-    ActionTypes::LiquidateCollateral,
-    ActionTypes::WithdrawBalance,
+    ActionTypes::LiquidateCollateral(true),
     ActionTypes::Vote(true),
 ];
 
@@ -62,20 +63,27 @@ pub fn authorize(
 
     // Check if the caller has lender authorizations on the vault
     let liquidity_request = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?;
-    if let Some(option) = liquidity_request.clone() {
-        if let Some(lender) = option.lender {
-            if caller.eq(&lender) && LENDER_AUTHORIZATIONS.contains(&action_type) {
-                return Ok(());
-            }
+    if let Some(ActiveOption {
+        lender: Some(lender),
+        state: Some(_state),
+        msg: _,
+    }) = liquidity_request
+    {
+        if caller.eq(&lender) && LENDER_AUTHORIZATIONS.contains(&action_type) {
+            return Ok(());
         }
     }
 
     // Check if the caller has open authorizations on the vault
-    if let Some(option) = liquidity_request {
-        if let None = option.lender {
-            if OPEN_AUTHORIZATIONS.contains(&action_type) {
-                return Ok(());
-            }
+    let liquidity_request = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?;
+    if let Some(ActiveOption {
+        lender: None,
+        state: None,
+        msg: _,
+    }) = liquidity_request
+    {
+        if OPEN_AUTHORIZATIONS.contains(&action_type) {
+            return Ok(());
         }
     }
 

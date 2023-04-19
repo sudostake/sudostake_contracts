@@ -30,8 +30,20 @@ pub fn instantiate(
     // Validate account_manager_address
     let acc_manager = deps.api.addr_validate(&msg.account_manager_address)?;
 
+    // Set default liquidation interval for defaulted fixed term loans
+    // Here we are setting as 30days
+    // @TODO extract this into an oracle contract
+    let liquidation_interval_in_seconds = 60 * 60 * 24 * 30;
+
     // Save contract state
-    CONFIG.save(deps.storage, &Config { owner, acc_manager })?;
+    CONFIG.save(
+        deps.storage,
+        &Config {
+            owner,
+            acc_manager,
+            liquidation_interval_in_seconds,
+        },
+    )?;
 
     // Init OPEN_LIQUIDITY_REQUEST to None
     OPEN_LIQUIDITY_REQUEST.save(deps.storage, &None)?;
@@ -101,9 +113,9 @@ pub fn execute(
             authorize(
                 &deps,
                 _info.sender.clone(),
-                ActionTypes::LiquidateCollateral {},
+                ActionTypes::LiquidateCollateral(helpers::has_open_liquidity_request(&deps)?),
             )?;
-            execute_liquidate_collateral(deps, _env, &_info)
+            execute_liquidate_collateral(deps, _env)
         }
         ExecuteMsg::TransferOwnership { to_address } => {
             authorize(
@@ -140,7 +152,11 @@ pub fn execute(
             execute_repay_loan(deps, _env)
         }
         ExecuteMsg::WithdrawBalance { to_address, funds } => {
-            authorize(&deps, _info.sender.clone(), ActionTypes::WithdrawBalance {})?;
+            authorize(
+                &deps,
+                _info.sender.clone(),
+                ActionTypes::WithdrawBalance(helpers::has_open_liquidity_request(&deps)?),
+            )?;
             execute_withdraw_balance(deps, _env, &_info, to_address, funds)
         }
     }
@@ -282,6 +298,7 @@ pub fn execute_open_liquidity_request(
             collateral_amount,
         } => {
             if helpers::query_total_delegations(&deps, &env)? < collateral_amount
+                || collateral_amount.is_zero()
                 || requested_amount.amount.is_zero()
                 || duration_in_seconds == 0u64
             {
@@ -422,6 +439,8 @@ pub fn execute_accept_liquidity_request(
                     is_lp_group,
                     start_time: env.block.time,
                     end_time: env.block.time.plus_seconds(duration_in_seconds),
+                    last_liquidation_date: None,
+                    already_claimed: Uint128::zero(),
                     processing_liquidation: false,
                 });
 
@@ -437,42 +456,27 @@ pub fn execute_accept_liquidity_request(
 }
 
 pub fn execute_claim_delegator_rewards(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
-    let mut distribute_msgs = vec![];
-    let mut total_rewards_claimed = Uint128::new(0);
-    let mut response = Response::new();
-
     // Calculate total_rewards_claimed and build distribute_msgs
-    deps.querier
-        .query_all_delegations(env.contract.address.clone())?
-        .iter()
-        .for_each(|d| {
-            distribute_msgs.push(DistributionMsg::WithdrawDelegatorReward {
-                validator: d.validator.clone(),
-            });
-
-            // Update total_rewards_claimed
-            deps.querier
-                .query_delegation(env.contract.address.clone(), d.validator.clone())
-                .unwrap()
-                .unwrap()
-                .accumulated_rewards
-                .iter()
-                .for_each(|c| total_rewards_claimed += c.amount);
-        });
-
-    // Add distribute_msgs for claiming rewards
-    response = response.add_messages(distribute_msgs);
+    let mut response = Response::new();
+    let (total_rewards_claimed, distribute_msgs) =
+        helpers::calculate_total_claimed_rewards(&deps, &env)?;
+    if !total_rewards_claimed.is_zero() {
+        response = response.add_messages(distribute_msgs);
+    }
 
     // Process lender claims if there is an active liquidity request on the vault
-    let liquidity_request = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?;
-    if let Some(option) = liquidity_request.clone() {
-        if option.lender.is_some() && option.state.is_some() {
-            if let Some(msg) =
-                helpers::process_lender_claims(deps, &env, option, total_rewards_claimed)?
-            {
-                // Add msg for sending claimed rewards to the lender
-                response = response.add_message(msg);
-            }
+    // then add the transfer_msg for lender_claims to response
+    if let Some(ActiveOption {
+        msg: _,
+        lender: Some(lender),
+        state: Some(state),
+    }) = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?
+    {
+        let lender_claims =
+            helpers::process_lender_claims(deps, &env, state, lender, total_rewards_claimed)?;
+        if let Some(msg) = lender_claims {
+            // Add msg for sending claimed rewards to the lender
+            response = response.add_message(msg);
         }
     }
 
@@ -486,12 +490,11 @@ pub fn execute_repay_loan(deps: DepsMut, env: Env) -> Result<Response, ContractE
     let liquidity_request = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?;
     let mut response = Response::new();
 
-    // Check if there is an active FixedTermLoan loan on the vault where processing_liquidation is false.
-    // Then we try to use the vault's unstaked balance to payback the
-    // requested_amount + interest_amount stated in the liquidity request
+    // Check if there is an active FixedTermLoan loan on the vault
+    // where processing_liquidation is false.
     if let Some(ActiveOption {
-        lender: Some(lender),
         msg: _,
+        lender: Some(lender),
         state:
             Some(LiquidityRequestOptionState::FixedTermLoan {
                 requested_amount,
@@ -500,12 +503,13 @@ pub fn execute_repay_loan(deps: DepsMut, env: Env) -> Result<Response, ContractE
                 is_lp_group,
                 start_time: _,
                 end_time: _,
+                last_liquidation_date: _,
+                already_claimed: _,
                 processing_liquidation: false,
             }),
     }) = liquidity_request
     {
         // Check if there is enough balance to repay requested_amount + interest_amount
-        // in the denomination of requested_amount.denom
         let repayment_amount = requested_amount.amount + interest_amount;
         let borrowed_denom_balance = helpers::get_amount_for_denom(
             &deps
@@ -526,7 +530,7 @@ pub fn execute_repay_loan(deps: DepsMut, env: Env) -> Result<Response, ContractE
             });
         }
 
-        // Add funds_transfer_msg to response
+        // Add funds_transfer_msg to send repayment_amount to the lender
         response = response.add_message(if is_lp_group.is_some() {
             WasmMsg::Execute {
                 contract_addr: lender.to_string(),
@@ -560,16 +564,135 @@ pub fn execute_repay_loan(deps: DepsMut, env: Env) -> Result<Response, ContractE
     Ok(response.add_attribute("method", "repay_loan"))
 }
 
-pub fn execute_liquidate_collateral(
-    deps: DepsMut,
-    env: Env,
-    info: &MessageInfo,
-) -> Result<Response, ContractError> {
-    // TODO implement this
-    // liquidation on fixed term loans can only happen when
-    // end_time < env.block.time
+pub fn execute_liquidate_collateral(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
+    let mut response = Response::new();
+
+    // Check if there is an active FixedTermLoan loan on the vault
+    if let Some(ActiveOption {
+        msg: _,
+        lender: Some(lender),
+        state:
+            Some(LiquidityRequestOptionState::FixedTermLoan {
+                requested_amount,
+                interest_amount,
+                collateral_amount,
+                is_lp_group,
+                start_time,
+                end_time,
+                already_claimed,
+                last_liquidation_date,
+                processing_liquidation: _,
+            }),
+    }) = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?
+    {
+        // liquidation on fixed term loans can only happen after expiration date
+        if env.block.time < end_time {
+            return Err(ContractError::Unauthorized {});
+        }
+
+        // Calculate total_available_collateral_balance = available_collateral_balance + total_rewards_claimed
+        let config = CONFIG.load(deps.storage)?;
+        let denom_str = deps.querier.query_bonded_denom()?;
+        let available_collateral_balance = helpers::get_amount_for_denom(
+            &deps
+                .querier
+                .query_all_balances(env.contract.address.clone())?,
+            denom_str.to_string(),
+        )?;
+        let (total_rewards_claimed, distribute_msgs) =
+            helpers::calculate_total_claimed_rewards(&deps, &env)?;
+        let total_available_collateral_balance =
+            available_collateral_balance + total_rewards_claimed;
+
+        // Calculate amount_to_claim which is limited by total_available_collateral_balance
+        let outstanding_debt = collateral_amount - already_claimed;
+        let amount_to_claim = if outstanding_debt < total_available_collateral_balance {
+            outstanding_debt
+        } else {
+            total_available_collateral_balance
+        };
+
+        // Calculate duration_since_last_liquidation
+        let duration_since_last_liquidation = if last_liquidation_date.is_some() {
+            env.block.time.seconds() - last_liquidation_date.unwrap().seconds()
+        } else {
+            config.liquidation_interval_in_seconds
+        };
+
+        // Add messages to unbond outstanding collateral amount from staked tokens
+        // When total_available_collateral_balance is not enough to clear the debt
+        let updated_already_claimed = already_claimed + amount_to_claim;
+        let claims_not_completed = updated_already_claimed < collateral_amount;
+        let can_unstake = duration_since_last_liquidation >= config.liquidation_interval_in_seconds;
+        let mut updated_last_liquidation_date = last_liquidation_date;
+        if claims_not_completed && can_unstake {
+            if let Some(undelegate_msgs) = helpers::unbond_tokens_from_validators(
+                &deps,
+                &env,
+                collateral_amount - updated_already_claimed,
+            )? {
+                updated_last_liquidation_date = Some(env.block.time);
+                response = response.add_messages(undelegate_msgs);
+            }
+        }
+
+        // Add messages to claim available staking rewards
+        if !total_rewards_claimed.is_zero() {
+            response = response.add_messages(distribute_msgs);
+        }
+
+        // Add messages to send amount_to_claim to the lender
+        if !amount_to_claim.is_zero() {
+            response = response.add_message(if is_lp_group.is_some() {
+                WasmMsg::Execute {
+                    contract_addr: lender.to_string(),
+                    msg: to_binary(&shared_types::ProcessPoolHook {
+                        vault_address: env.contract.address.to_string(),
+                        event: if claims_not_completed {
+                            shared_types::VaultEvents::ClaimedRewards {}
+                        } else {
+                            shared_types::VaultEvents::FinalizedClaim {}
+                        },
+                    })?,
+                    funds: vec![Coin {
+                        denom: denom_str,
+                        amount: amount_to_claim,
+                    }],
+                }
+                .into()
+            } else {
+                helpers::get_bank_transfer_to_msg(&lender, &denom_str, amount_to_claim)
+            });
+        }
+
+        // Update the liquidity request state
+        OPEN_LIQUIDITY_REQUEST.update(deps.storage, |data| -> Result<_, ContractError> {
+            if claims_not_completed {
+                let mut option = data.unwrap();
+                option.state = Some(LiquidityRequestOptionState::FixedTermLoan {
+                    requested_amount,
+                    interest_amount,
+                    collateral_amount,
+                    is_lp_group,
+                    start_time,
+                    end_time,
+                    last_liquidation_date: updated_last_liquidation_date,
+                    already_claimed: updated_already_claimed,
+                    processing_liquidation: true,
+                });
+
+                Ok(Some(option))
+            } else {
+                // Close option as repayment has been processed successfully
+                Ok(None)
+            }
+        })?;
+    } else {
+        return Err(ContractError::Unauthorized {});
+    }
+
     // respond
-    Ok(Response::default())
+    Ok(response.add_attribute("method", "liquidate_collateral"))
 }
 
 pub fn execute_withdraw_balance(
@@ -590,7 +713,7 @@ pub fn execute_transfer_ownership(
     info: &MessageInfo,
     to_address: String,
 ) -> Result<Response, ContractError> {
-    // TODO implement this
+    // TODO
     // respond
     Ok(Response::default())
 }

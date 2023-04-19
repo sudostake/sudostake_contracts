@@ -13,6 +13,7 @@ mod tests {
     const SUPPLY: u128 = 500_000_000u128;
     const VALIDATOR_ONE_ADDRESS: &str = "validator_one";
     const VALIDATOR_TWO_ADDRESS: &str = "validator_two";
+    const LIQUIDATION_INTREVAL: u64 = 2592000u64; // 60 * 60 * 24 * 30
 
     fn mock_app() -> App {
         AppBuilder::new().build(|router, api, storage| {
@@ -136,6 +137,7 @@ mod tests {
             Config {
                 owner: Addr::unchecked(USER),
                 acc_manager: Addr::unchecked(USER),
+                liquidation_interval_in_seconds: LIQUIDATION_INTREVAL
             }
         );
     }
@@ -506,11 +508,11 @@ mod tests {
             option: crate::msg::LiquidityRequestOptionMsg::FixedTermLoan {
                 requested_amount: Coin {
                     denom: IBC_DENOM_1.to_string(),
-                    amount: Uint128::zero(),
+                    amount,
                 },
                 interest_amount: Uint128::zero(),
-                collateral_amount: Uint128::zero(),
                 duration_in_seconds: 0u64,
+                collateral_amount: Uint128::zero(),
             },
         };
         router
@@ -983,6 +985,8 @@ mod tests {
                     is_lp_group: None,
                     start_time: router.block_info().time,
                     end_time: router.block_info().time.plus_seconds(duration_in_seconds),
+                    last_liquidation_date: None,
+                    already_claimed: Uint128::zero(),
                     processing_liquidation: false
                 }),
                 msg: option
@@ -1853,5 +1857,244 @@ mod tests {
                 amount: Uint128::new(SUPPLY)
             }
         );
+    }
+
+    #[test]
+    fn test_liquidate_collateral() {
+        // Step 1
+        // Instantiate contract instance
+        // ------------------------------------------------------------------------------
+        let mut router = mock_app();
+        let vault_c_addr = instantiate_vault(&mut router);
+
+        // Step 2
+        // Delegate to VALIDATOR_ONE_ADDRESS & VALIDATOR_TWO_ADDRESS
+        // ------------------------------------------------------------------------------
+        let delegated_amount = Uint128::new(1_000_000);
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &ExecuteMsg::Delegate {
+                    validator: VALIDATOR_ONE_ADDRESS.to_string(),
+                    amount: delegated_amount,
+                },
+                &[Coin {
+                    denom: STAKING_DENOM.into(),
+                    amount: delegated_amount,
+                }],
+            )
+            .unwrap();
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &ExecuteMsg::Delegate {
+                    validator: VALIDATOR_TWO_ADDRESS.to_string(),
+                    amount: delegated_amount,
+                },
+                &[Coin {
+                    denom: STAKING_DENOM.into(),
+                    amount: delegated_amount,
+                }],
+            )
+            .unwrap();
+
+        // Step 3
+        // Error liquidating fixed term loan when no option is available
+        // ------------------------------------------------------------------------------
+        let liquidation_msg = ExecuteMsg::LiquidateCollateral {};
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &liquidation_msg,
+                &[],
+            )
+            .unwrap_err();
+
+        // Step 4
+        // Create a valid FixedTermLoan liquidity request
+        // ------------------------------------------------------------------------------
+        let requested_amount = Uint128::new(300_000);
+        let interest_amount = Uint128::new(30_000);
+        let one_year_duration = 60 * 60 * 24 * 365; // 1 year;
+        let option = LiquidityRequestOptionMsg::FixedTermLoan {
+            requested_amount: Coin {
+                denom: IBC_DENOM_1.to_string(),
+                amount: requested_amount,
+            },
+            interest_amount,
+            collateral_amount: requested_amount,
+            duration_in_seconds: one_year_duration,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &ExecuteMsg::OpenLiquidityRequest {
+                    option: option.clone(),
+                },
+                &[],
+            )
+            .unwrap();
+
+        // Step 5
+        // Try to call liquidate collateral with ContractError::Unauthorized {}
+        // because there is a liquidity request that has not been accepted yet
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &liquidation_msg,
+                &[],
+            )
+            .unwrap_err();
+
+        // Step 6
+        // Accept the open liquidity request
+        // ------------------------------------------------------------------------------
+        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest { is_lp_group: None };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &accept_liquidity_request_msg,
+                &[Coin {
+                    denom: IBC_DENOM_1.to_string(),
+                    amount: requested_amount,
+                }],
+            )
+            .unwrap();
+
+        // Step 7
+        // Try to call liquidate collateral with ContractError::Unauthorized {}
+        // because there is a fixed term loans that have not yet expired
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &liquidation_msg,
+                &[],
+            )
+            .unwrap_err();
+
+        // Step 8
+        // Fast foward the time so the option expires without repayment
+        // ------------------------------------------------------------------------------
+        router.update_block(|block| block.time = block.time.plus_seconds(one_year_duration));
+
+        // Step 9
+        // Try to call liquidate collateral with ContractError::Unauthorized {}
+        // when a wrong_user is calling this method
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked("WRONG_OWNER"),
+                vault_c_addr.clone(),
+                &liquidation_msg,
+                &[],
+            )
+            .unwrap_err();
+
+        // Step 10
+        // Begin liquidation of collateral, partial liquidation
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &liquidation_msg,
+                &[],
+            )
+            .unwrap();
+
+        // Step 11
+        // Verify that accumulated staking rewards and
+        // available staking_demon vault balance was send to lender
+        // ------------------------------------------------------------------------------
+        let expected_claims_after_one_years = Uint128::new(200_000);
+        let lender_balance =
+            bank_balance(&mut router, &Addr::unchecked(USER), STAKING_DENOM.into());
+        assert_eq!(
+            lender_balance,
+            Coin {
+                denom: STAKING_DENOM.to_string(),
+                amount: Uint128::new(SUPPLY) - delegated_amount - delegated_amount
+                    + expected_claims_after_one_years
+            }
+        );
+
+        // Step 12
+        // Try to repay loan with ContractError::Unauthorized {}
+        // when liquidation is processing
+        // ------------------------------------------------------------------------------
+        let repay_loan_msg = ExecuteMsg::RepayLoan {};
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &repay_loan_msg,
+                &[],
+            )
+            .unwrap_err();
+
+        // Step 13
+        // Foward the blockchain ahead and process unbonding queue
+        // ------------------------------------------------------------------------------
+        router.update_block(|block| block.time = block.time.plus_seconds(10));
+        router
+            .sudo(cw_multi_test::SudoMsg::Staking(
+                cw_multi_test::StakingSudo::ProcessQueue {},
+            ))
+            .unwrap();
+
+        // Step 14
+        // Verify that vault balance contains the expected_outstanding_balance
+        // ------------------------------------------------------------------------------
+        let expected_outstanding_balance = Uint128::new(100_000);
+        let vault_balance = bank_balance(&mut router, &vault_c_addr, STAKING_DENOM.into());
+        assert_eq!(
+            vault_balance,
+            Coin {
+                denom: STAKING_DENOM.to_string(),
+                amount: expected_outstanding_balance
+            }
+        );
+
+        // Step 15
+        // Complete liquidation of collateral
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &liquidation_msg,
+                &[],
+            )
+            .unwrap();
+
+        // Step 16
+        // Verify that outstanding balance was send to lender
+        // ------------------------------------------------------------------------------
+        let lender_balance =
+            bank_balance(&mut router, &Addr::unchecked(USER), STAKING_DENOM.into());
+        assert_eq!(
+            lender_balance,
+            Coin {
+                denom: STAKING_DENOM.to_string(),
+                amount: Uint128::new(SUPPLY) - delegated_amount - delegated_amount
+                    + expected_claims_after_one_years
+                    + expected_outstanding_balance
+            }
+        );
+
+        // Step 17
+        // Verify that the option has been finalized
+        // ------------------------------------------------------------------------------
+        let info = get_vault_info(&mut router, &vault_c_addr);
+        assert_eq!(info.liquidity_request, None);
     }
 }
