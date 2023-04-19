@@ -2097,4 +2097,204 @@ mod tests {
         let info = get_vault_info(&mut router, &vault_c_addr);
         assert_eq!(info.liquidity_request, None);
     }
+
+    #[test]
+    fn test_withdraw_balance() {
+        // Step 1
+        // Instantiate contract instance
+        // ------------------------------------------------------------------------------
+        let mut router = mock_app();
+        let vault_c_addr = instantiate_vault(&mut router);
+
+        // Step 2
+        // Send some tokens to vault_c_addr
+        // ------------------------------------------------------------------------------
+        let sent_amount = Uint128::new(1_000_000);
+        router
+            .send_tokens(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &[Coin {
+                    denom: STAKING_DENOM.to_string(),
+                    amount: sent_amount,
+                }],
+            )
+            .unwrap();
+
+        // Step 3
+        // Delegate to VALIDATOR_ONE_ADDRESS
+        // ------------------------------------------------------------------------------
+        let delegated_amount = Uint128::new(1_000_000);
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &ExecuteMsg::Delegate {
+                    validator: VALIDATOR_ONE_ADDRESS.to_string(),
+                    amount: delegated_amount,
+                },
+                &[Coin {
+                    denom: STAKING_DENOM.into(),
+                    amount: delegated_amount,
+                }],
+            )
+            .unwrap();
+
+        // Step 4
+        // Create a valid FixedTermLoan liquidity request
+        // ------------------------------------------------------------------------------
+        let requested_amount = Uint128::new(300_000);
+        let interest_amount = Uint128::new(30_000);
+        let one_year_duration = 60 * 60 * 24 * 365; // 1 year;
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &ExecuteMsg::OpenLiquidityRequest {
+                    option: LiquidityRequestOptionMsg::FixedTermLoan {
+                        requested_amount: Coin {
+                            denom: IBC_DENOM_1.to_string(),
+                            amount: requested_amount,
+                        },
+                        interest_amount,
+                        collateral_amount: requested_amount,
+                        duration_in_seconds: one_year_duration,
+                    },
+                },
+                &[],
+            )
+            .unwrap();
+
+        // Step 5
+        // Test error case ContractError::Unauthorized {}
+        // due to active liquidity request
+        // ------------------------------------------------------------------------------
+        let withdraw_balance_msg = ExecuteMsg::WithdrawBalance {
+            to_address: None,
+            funds: Coin {
+                denom: STAKING_DENOM.to_string(),
+                amount: sent_amount,
+            },
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &withdraw_balance_msg,
+                &[],
+            )
+            .unwrap_err();
+
+        // Step 6
+        // Close pending liquidity request
+        // ------------------------------------------------------------------------------
+        let close_liquidity_request_msg = ExecuteMsg::CloseLiquidityRequest {};
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &close_liquidity_request_msg,
+                &[],
+            )
+            .unwrap();
+
+        // Step 7
+        // Test error case ContractError::Unauthorized {}
+        // when a user not vault owner tries to withdraw balance
+        // ------------------------------------------------------------------------------
+        let wrong_owner = Addr::unchecked("WRONG_OWNER");
+        router
+            .execute_contract(
+                wrong_owner,
+                vault_c_addr.clone(),
+                &withdraw_balance_msg,
+                &[],
+            )
+            .unwrap_err();
+
+        // Step 8
+        // Test error case ContractError::InsufficientBalance {}
+        // ------------------------------------------------------------------------------
+        let withdraw_balance_msg = ExecuteMsg::WithdrawBalance {
+            to_address: None,
+            funds: Coin {
+                denom: STAKING_DENOM.to_string(),
+                amount: sent_amount + sent_amount,
+            },
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &withdraw_balance_msg,
+                &[],
+            )
+            .unwrap_err();
+
+        // Step 9
+        // Withdraw half of the contract balance without providing an optional recipient
+        // ------------------------------------------------------------------------------
+        let half = Uint128::new(500_000);
+        let withdraw_balance_msg = ExecuteMsg::WithdrawBalance {
+            to_address: None,
+            funds: Coin {
+                denom: STAKING_DENOM.to_string(),
+                amount: half,
+            },
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &withdraw_balance_msg,
+                &[],
+            )
+            .unwrap();
+
+        // Step 10
+        // Verify caller's balance
+        // ------------------------------------------------------------------------------
+        let balance = bank_balance(
+            &mut router,
+            &Addr::unchecked(USER),
+            STAKING_DENOM.to_string(),
+        );
+        assert_eq!(
+            balance.amount,
+            Uint128::new(SUPPLY) - delegated_amount - half
+        );
+
+        // Step 11
+        // Withdraw the remaining half of the contract balance
+        // by providing an optional recipient
+        // ------------------------------------------------------------------------------
+        let recipient = Addr::unchecked("recipient");
+        let withdraw_balance_msg = ExecuteMsg::WithdrawBalance {
+            to_address: Some(recipient.to_string()),
+            funds: Coin {
+                denom: STAKING_DENOM.to_string(),
+                amount: half,
+            },
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &withdraw_balance_msg,
+                &[],
+            )
+            .unwrap();
+
+        // Step 12
+        // Verify recipient's balance
+        // ------------------------------------------------------------------------------
+        let balance = bank_balance(&mut router, &recipient, STAKING_DENOM.to_string());
+        assert_eq!(balance.amount, half);
+
+        // Step 13
+        // Verify that the contract_addr balance is zero
+        // ------------------------------------------------------------------------------
+        let balance = bank_balance(&mut router, &vault_c_addr, STAKING_DENOM.to_string());
+        assert_eq!(balance.amount, Uint128::zero());
+    }
 }

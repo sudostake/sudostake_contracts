@@ -6,8 +6,8 @@ use crate::state::{
     ActiveOption, Config, LiquidityRequestOptionState, CONFIG, OPEN_LIQUIDITY_REQUEST,
 };
 use cosmwasm_std::{
-    attr, entry_point, to_binary, Binary, Coin, Deps, DepsMut, DistributionMsg, Env, MessageInfo,
-    Response, StakingMsg, StdResult, Uint128, VoteOption, WasmMsg,
+    attr, entry_point, to_binary, Addr, Binary, Coin, Deps, DepsMut, Env, MessageInfo, Response,
+    StakingMsg, StdResult, Uint128, VoteOption, WasmMsg,
 };
 
 // contract info
@@ -157,7 +157,7 @@ pub fn execute(
                 _info.sender.clone(),
                 ActionTypes::WithdrawBalance(helpers::has_open_liquidity_request(&deps)?),
             )?;
-            execute_withdraw_balance(deps, _env, &_info, to_address, funds)
+            execute_withdraw_balance(deps, _env, to_address, funds)
         }
     }
 }
@@ -698,13 +698,43 @@ pub fn execute_liquidate_collateral(deps: DepsMut, env: Env) -> Result<Response,
 pub fn execute_withdraw_balance(
     deps: DepsMut,
     env: Env,
-    info: &MessageInfo,
     to_address: Option<String>,
     funds: Coin,
 ) -> Result<Response, ContractError> {
-    // TODO implement this
-    // respond
-    Ok(Response::default())
+    // Check if the contract balance is >= the requested amount to withdraw
+    let available_balance = helpers::get_amount_for_denom(
+        &deps
+            .querier
+            .query_all_balances(env.contract.address.clone())?,
+        funds.denom.clone(),
+    )?;
+
+    if available_balance < funds.amount {
+        return Err(ContractError::InsufficientBalance {
+            available: Coin {
+                amount: available_balance,
+                denom: funds.denom.clone(),
+            },
+            required: funds,
+        });
+    }
+
+    // Get the recipient to send funds to
+    let recipient: Addr;
+    if let Some(val) = to_address {
+        recipient = deps.api.addr_validate(&val)?;
+    } else {
+        let config = CONFIG.load(deps.storage)?;
+        recipient = config.owner;
+    }
+
+    // construct sdk msg to transfer funds to recipient
+    let msg = helpers::get_bank_transfer_to_msg(&recipient, &funds.denom, funds.amount);
+
+    Ok(Response::new().add_message(msg).add_attributes(vec![
+        attr("method", "withdraw_balance"),
+        attr("recipient", recipient.to_string()),
+    ]))
 }
 
 pub fn execute_transfer_ownership(
