@@ -2297,4 +2297,49 @@ mod tests {
         let balance = bank_balance(&mut router, &vault_c_addr, STAKING_DENOM.to_string());
         assert_eq!(balance.amount, Uint128::zero());
     }
+
+    #[test]
+    fn test_transfer_ownership() {
+        // Step 1
+        // Instantiate contract instance
+        // ------------------------------------------------------------------------------
+        let mut router = mock_app();
+        let vault_c_addr = instantiate_vault(&mut router);
+
+        // Step 2
+        // Test error case  ContractError::Unauthorized {}
+        // When transfer_ownership is called by a user who is not the current
+        // vault owner
+        // ------------------------------------------------------------------------------
+        let new_owner = "new_owner".to_string();
+        let transfer_ownership_msg = ExecuteMsg::TransferOwnership {
+            to_address: new_owner.clone(),
+        };
+        router
+            .execute_contract(
+                Addr::unchecked("fake_owner"),
+                vault_c_addr.clone(),
+                &transfer_ownership_msg,
+                &[],
+            )
+            .unwrap_err();
+
+        // Step 3
+        // set the new vault owner by the current vault owner
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &transfer_ownership_msg,
+                &[],
+            )
+            .unwrap();
+
+        // Step 4
+        // Query the vault info to verify the new owner
+        // ------------------------------------------------------------------------------
+        let info = get_vault_info(&mut router, &vault_c_addr);
+        assert_eq!(info.config.owner, Addr::unchecked(new_owner));
+    }
 }

@@ -123,7 +123,7 @@ pub fn execute(
                 _info.sender.clone(),
                 ActionTypes::TransferOwnership {},
             )?;
-            execute_transfer_ownership(deps, _env, &_info, to_address)
+            execute_transfer_ownership(deps, to_address)
         }
         ExecuteMsg::Redelegate {
             src_validator,
@@ -739,11 +739,17 @@ pub fn execute_withdraw_balance(
 
 pub fn execute_transfer_ownership(
     deps: DepsMut,
-    env: Env,
-    info: &MessageInfo,
     to_address: String,
 ) -> Result<Response, ContractError> {
-    // TODO
+    // validate the new owner_address
+    let new_owner = deps.api.addr_validate(&to_address)?;
+
+    // Set the new owner of this vault
+    CONFIG.update(deps.storage, |mut data| -> Result<_, ContractError> {
+        data.owner = new_owner;
+        Ok(data)
+    })?;
+
     // respond
     Ok(Response::default())
 }
