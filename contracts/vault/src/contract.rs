@@ -7,7 +7,7 @@ use crate::state::{
 };
 use cosmwasm_std::{
     attr, entry_point, to_binary, Addr, Binary, Coin, Deps, DepsMut, Env, MessageInfo, Response,
-    StakingMsg, StdResult, Uint128, VoteOption, WasmMsg,
+    StakingMsg, StdResult, Uint128, VoteOption,
 };
 
 // contract info
@@ -93,14 +93,6 @@ pub fn execute(
             )?;
             execute_close_liquidity_request(deps)
         }
-        ExecuteMsg::Vote { proposal_id, vote } => {
-            authorize(
-                &deps,
-                _info.sender.clone(),
-                ActionTypes::Vote(helpers::has_open_liquidity_request(&deps)?),
-            )?;
-            execute_vote(deps, _env, &_info, proposal_id, vote)
-        }
         ExecuteMsg::ClaimDelegatorRewards {} => {
             authorize(
                 &deps,
@@ -134,13 +126,13 @@ pub fn execute(
             execute_redelegate(deps, _env, &_info, src_validator, dst_validator, amount)
         }
 
-        ExecuteMsg::AcceptLiquidityRequest { is_lp_group } => {
+        ExecuteMsg::AcceptLiquidityRequest {} => {
             authorize(
                 &deps,
                 _info.sender.clone(),
                 ActionTypes::AcceptLiquidityRequest {},
             )?;
-            execute_accept_liquidity_request(deps, _env, &_info, is_lp_group)
+            execute_accept_liquidity_request(deps, _env, &_info)
         }
 
         ExecuteMsg::RepayLoan {} => {
@@ -158,6 +150,10 @@ pub fn execute(
                 ActionTypes::WithdrawBalance(helpers::has_open_liquidity_request(&deps)?),
             )?;
             execute_withdraw_balance(deps, _env, to_address, funds)
+        }
+        ExecuteMsg::Vote { proposal_id, vote } => {
+            authorize(&deps, _info.sender.clone(), ActionTypes::Vote {})?;
+            execute_vote(deps, _env, &_info, proposal_id, vote)
         }
     }
 }
@@ -341,7 +337,6 @@ pub fn execute_accept_liquidity_request(
     deps: DepsMut,
     env: Env,
     info: &MessageInfo,
-    is_lp_group: Option<bool>,
 ) -> Result<Response, ContractError> {
     let option = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?.unwrap();
 
@@ -371,7 +366,6 @@ pub fn execute_accept_liquidity_request(
                     claimable_tokens,
                     already_claimed: Uint128::zero(),
                     can_cast_vote,
-                    is_lp_group,
                 });
 
                 // update the lender info
@@ -404,7 +398,6 @@ pub fn execute_accept_liquidity_request(
                     end_time: env.block.time.plus_seconds(duration_in_seconds),
                     last_claim_time: env.block.time,
                     can_cast_vote,
-                    is_lp_group,
                 });
 
                 // update the lender info
@@ -436,7 +429,6 @@ pub fn execute_accept_liquidity_request(
                     requested_amount,
                     interest_amount,
                     collateral_amount,
-                    is_lp_group,
                     start_time: env.block.time,
                     end_time: env.block.time.plus_seconds(duration_in_seconds),
                     last_liquidation_date: None,
@@ -500,7 +492,6 @@ pub fn execute_repay_loan(deps: DepsMut, env: Env) -> Result<Response, ContractE
                 requested_amount,
                 interest_amount,
                 collateral_amount: _,
-                is_lp_group,
                 start_time: _,
                 end_time: _,
                 last_liquidation_date: _,
@@ -531,26 +522,11 @@ pub fn execute_repay_loan(deps: DepsMut, env: Env) -> Result<Response, ContractE
         }
 
         // Add funds_transfer_msg to send repayment_amount to the lender
-        response = response.add_message(if is_lp_group.is_some() {
-            WasmMsg::Execute {
-                contract_addr: lender.to_string(),
-                msg: to_binary(&shared_types::ProcessPoolHook {
-                    vault_address: env.contract.address.to_string(),
-                    event: shared_types::VaultEvents::FinalizedClaim {},
-                })?,
-                funds: vec![Coin {
-                    denom: requested_amount.denom.clone(),
-                    amount: repayment_amount,
-                }],
-            }
-            .into()
-        } else {
-            helpers::get_bank_transfer_to_msg(
-                &lender,
-                &requested_amount.denom.clone(),
-                repayment_amount,
-            )
-        });
+        response = response.add_message(helpers::get_bank_transfer_to_msg(
+            &lender,
+            &requested_amount.denom.clone(),
+            repayment_amount,
+        ));
 
         // Close option as repayment has been processed successfully
         OPEN_LIQUIDITY_REQUEST.update(deps.storage, |mut _data| -> Result<_, ContractError> {
@@ -576,7 +552,6 @@ pub fn execute_liquidate_collateral(deps: DepsMut, env: Env) -> Result<Response,
                 requested_amount,
                 interest_amount,
                 collateral_amount,
-                is_lp_group,
                 start_time,
                 end_time,
                 already_claimed,
@@ -643,26 +618,11 @@ pub fn execute_liquidate_collateral(deps: DepsMut, env: Env) -> Result<Response,
 
         // Add messages to send amount_to_claim to the lender
         if !amount_to_claim.is_zero() {
-            response = response.add_message(if is_lp_group.is_some() {
-                WasmMsg::Execute {
-                    contract_addr: lender.to_string(),
-                    msg: to_binary(&shared_types::ProcessPoolHook {
-                        vault_address: env.contract.address.to_string(),
-                        event: if claims_not_completed {
-                            shared_types::VaultEvents::ClaimedRewards {}
-                        } else {
-                            shared_types::VaultEvents::FinalizedClaim {}
-                        },
-                    })?,
-                    funds: vec![Coin {
-                        denom: denom_str,
-                        amount: amount_to_claim,
-                    }],
-                }
-                .into()
-            } else {
-                helpers::get_bank_transfer_to_msg(&lender, &denom_str, amount_to_claim)
-            });
+            response = response.add_message(helpers::get_bank_transfer_to_msg(
+                &lender,
+                &denom_str,
+                amount_to_claim,
+            ));
         }
 
         // Update the liquidity request state
@@ -673,7 +633,6 @@ pub fn execute_liquidate_collateral(deps: DepsMut, env: Env) -> Result<Response,
                     requested_amount,
                     interest_amount,
                     collateral_amount,
-                    is_lp_group,
                     start_time,
                     end_time,
                     last_liquidation_date: updated_last_liquidation_date,
@@ -750,8 +709,10 @@ pub fn execute_transfer_ownership(
         Ok(data)
     })?;
 
-    // respond
-    Ok(Response::default())
+    Ok(Response::new().add_attributes(vec![
+        attr("method", "transfer_ownership"),
+        attr("to_address", to_address.to_string()),
+    ]))
 }
 
 pub fn execute_vote(
@@ -761,10 +722,21 @@ pub fn execute_vote(
     proposal_id: u64,
     vote: VoteOption,
 ) -> Result<Response, ContractError> {
-    // TODO
-    // use cosmwasm_std::{GovMsg, VoteOption};
+    let mut response = Response::new();
+    // todo
+    //
+    // lender_can_cast_vote = has_active_lro ? (active_option_gives_voting_rights ? true : false) : false
+    //
+    // owner_can_vote = info.sender == owner && !lender_can_cast_vote
+    //
+    // lender_can_vote = info.sender == lender && lender_can_cast_vote
+    //
+    // if owner_can_vote || lender_can_vote {
+    //    response = response.add_message(GovMsg::Vote { proposal_id, vote });
+    // }
+    //
     // respond
-    Ok(Response::default())
+    Ok(response.add_attribute("method", "vote"))
 }
 
 #[entry_point]

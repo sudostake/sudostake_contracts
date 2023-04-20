@@ -30,14 +30,6 @@ pub enum ExecuteMsg {
     /// their contribution from a LRO funding pool before the LRO is accepted.
     UnsubscribeFromPool { vault_id: u16 },
 
-    /// Allows any member of an active LRO funding pool, to trigger the underlying vault,
-    /// to carry out actions such as claim_rewards, begin_liquidation, finalize_contract
-    ProcessPool { vault_id: u16 },
-
-    /// Allows the LP_GROUP to listen to events emitted by the underlying vaults
-    /// after ProcessLRO is called on an active vault funded by the group members.
-    ProcessPoolHook(shared_types::ProcessPoolHook),
-
     /// Allows group members who are subscribed to a LRO pool to claim their
     /// share of the returns from the pool account after finalized_claim
     /// event is emitted by the underlying vault.

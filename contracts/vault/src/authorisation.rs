@@ -21,8 +21,7 @@ pub enum ActionTypes {
     ClaimDelegatorRewards,
     LiquidateCollateral(WithOpenLiquidityRequest),
     RepayLoan(WithOpenLiquidityRequest),
-    // todo: update voting authorizations
-    Vote(WithOpenLiquidityRequest),
+    Vote,
 }
 
 // Applies to the owner of the vault
@@ -37,14 +36,14 @@ const OWNER_AUTHORIZATIONS: [ActionTypes; 11] = [
     ActionTypes::ClaimDelegatorRewards,
     ActionTypes::LiquidateCollateral(true),
     ActionTypes::WithdrawBalance(false),
-    ActionTypes::Vote(false),
+    ActionTypes::Vote,
 ];
 
 // Applies to the active lenders on the vault
 const LENDER_AUTHORIZATIONS: [ActionTypes; 3] = [
     ActionTypes::ClaimDelegatorRewards,
     ActionTypes::LiquidateCollateral(true),
-    ActionTypes::Vote(true),
+    ActionTypes::Vote,
 ];
 
 // Applies to all users trying to lend to the open liquidity request option

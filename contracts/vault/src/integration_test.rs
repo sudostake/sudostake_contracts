@@ -614,7 +614,7 @@ mod tests {
                     amount: Uint128::zero(),
                 },
                 claimable_tokens: Uint128::zero(),
-                can_cast_vote: None,
+                can_cast_vote: false,
             },
         };
         router
@@ -635,7 +635,7 @@ mod tests {
                 amount,
             },
             claimable_tokens: amount,
-            can_cast_vote: None,
+            can_cast_vote: false,
         };
         router
             .execute_contract(
@@ -713,7 +713,7 @@ mod tests {
                     amount: Uint128::zero(),
                 },
                 duration_in_seconds: 0u64,
-                can_cast_vote: None,
+                can_cast_vote: false,
             },
         };
         router
@@ -734,7 +734,7 @@ mod tests {
                 amount,
             },
             duration_in_seconds: 60u64,
-            can_cast_vote: None,
+            can_cast_vote: false,
         };
 
         router
@@ -826,7 +826,7 @@ mod tests {
                 amount,
             },
             duration_in_seconds: 60u64,
-            can_cast_vote: None,
+            can_cast_vote: false,
         };
 
         router
@@ -904,7 +904,7 @@ mod tests {
         // Test error case ContractError::Unauthorized {}
         // When there is no open liquidity request on the vault
         // ------------------------------------------------------------------------------
-        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest { is_lp_group: None };
+        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest {};
         router
             .execute_contract(
                 Addr::unchecked(USER),
@@ -982,7 +982,6 @@ mod tests {
                     },
                     interest_amount: Uint128::zero(),
                     collateral_amount: amount,
-                    is_lp_group: None,
                     start_time: router.block_info().time,
                     end_time: router.block_info().time.plus_seconds(duration_in_seconds),
                     last_liquidation_date: None,
@@ -1047,7 +1046,7 @@ mod tests {
                 amount,
             },
             claimable_tokens: amount,
-            can_cast_vote: None,
+            can_cast_vote: false,
         };
         router
             .execute_contract(
@@ -1064,7 +1063,7 @@ mod tests {
         // Test error case ContractError::InvalidInputAmount {}
         // by sending the wrong requested amount
         // ------------------------------------------------------------------------------
-        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest { is_lp_group: None };
+        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest {};
         router
             .execute_contract(
                 Addr::unchecked(USER),
@@ -1105,8 +1104,7 @@ mod tests {
                     },
                     claimable_tokens: amount,
                     already_claimed: Uint128::zero(),
-                    can_cast_vote: None,
-                    is_lp_group: None
+                    can_cast_vote: false,
                 }),
                 msg: option
             })
@@ -1167,7 +1165,7 @@ mod tests {
                 amount,
             },
             duration_in_seconds,
-            can_cast_vote: None,
+            can_cast_vote: false,
         };
         router
             .execute_contract(
@@ -1184,7 +1182,7 @@ mod tests {
         // Test error case ContractError::InvalidInputAmount {}
         // by sending the wrong requested amount
         // ------------------------------------------------------------------------------
-        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest { is_lp_group: None };
+        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest {};
         router
             .execute_contract(
                 Addr::unchecked(USER),
@@ -1226,8 +1224,7 @@ mod tests {
                     start_time: router.block_info().time,
                     last_claim_time: router.block_info().time,
                     end_time: router.block_info().time.plus_seconds(duration_in_seconds),
-                    can_cast_vote: None,
-                    is_lp_group: None
+                    can_cast_vote: false,
                 }),
                 msg: option
             })
@@ -1367,7 +1364,7 @@ mod tests {
                 amount: requested_amount,
             },
             claimable_tokens: requested_amount,
-            can_cast_vote: None,
+            can_cast_vote: false,
         };
         router
             .execute_contract(
@@ -1383,7 +1380,7 @@ mod tests {
         // Step 4
         // Accept the option
         // ------------------------------------------------------------------------------
-        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest { is_lp_group: None };
+        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest {};
         router
             .execute_contract(
                 Addr::unchecked(USER),
@@ -1454,8 +1451,7 @@ mod tests {
                     },
                     claimable_tokens: requested_amount,
                     already_claimed: expected_claims_after_two_years,
-                    can_cast_vote: None,
-                    is_lp_group: None
+                    can_cast_vote: false,
                 }),
                 msg: option
             })
@@ -1551,7 +1547,7 @@ mod tests {
                 amount: Uint128::new(350_000),
             },
             duration_in_seconds,
-            can_cast_vote: None,
+            can_cast_vote: false,
         };
         router
             .execute_contract(
@@ -1567,7 +1563,7 @@ mod tests {
         // Step 4
         // Accept the option
         // ------------------------------------------------------------------------------
-        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest { is_lp_group: None };
+        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest {};
         router
             .execute_contract(
                 Addr::unchecked(USER),
@@ -1645,8 +1641,7 @@ mod tests {
                     start_time,
                     last_claim_time,
                     end_time: start_time.plus_seconds(duration_in_seconds),
-                    can_cast_vote: None,
-                    is_lp_group: None
+                    can_cast_vote: false,
                 }),
                 msg: option
             })
@@ -1785,7 +1780,7 @@ mod tests {
         // Step 6
         // Accept the open liquidity request
         // ------------------------------------------------------------------------------
-        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest { is_lp_group: None };
+        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest {};
         router
             .execute_contract(
                 Addr::unchecked(USER),
@@ -1955,7 +1950,7 @@ mod tests {
         // Step 6
         // Accept the open liquidity request
         // ------------------------------------------------------------------------------
-        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest { is_lp_group: None };
+        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest {};
         router
             .execute_contract(
                 Addr::unchecked(USER),
@@ -2341,5 +2336,10 @@ mod tests {
         // ------------------------------------------------------------------------------
         let info = get_vault_info(&mut router, &vault_c_addr);
         assert_eq!(info.config.owner, Addr::unchecked(new_owner));
+    }
+
+    #[test]
+    fn test_vote() {
+        // todo descrie this
     }
 }

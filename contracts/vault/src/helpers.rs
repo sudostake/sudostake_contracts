@@ -3,8 +3,8 @@ use crate::{
     ContractError,
 };
 use cosmwasm_std::{
-    to_binary, Addr, BankMsg, Coin, CosmosMsg, DepsMut, DistributionMsg, Env, StakingMsg, StdError,
-    StdResult, Uint128, WasmMsg,
+    Addr, BankMsg, Coin, CosmosMsg, DepsMut, DistributionMsg, Env, StakingMsg, StdError, StdResult,
+    Uint128,
 };
 
 pub fn verify_validator_is_active(deps: &DepsMut, validator: &str) -> Result<(), ContractError> {
@@ -117,7 +117,6 @@ pub fn process_lender_claims(
             can_cast_vote,
             claimable_tokens,
             already_claimed,
-            is_lp_group,
         } => {
             // Calculate amount_to_send_to_lender from total_rewards_claimed
             let outstanding_amount = claimable_tokens - already_claimed;
@@ -139,7 +138,6 @@ pub fn process_lender_claims(
                         claimable_tokens,
                         already_claimed: updated_already_claimed,
                         can_cast_vote,
-                        is_lp_group,
                     });
 
                     Ok(Some(option))
@@ -147,26 +145,11 @@ pub fn process_lender_claims(
             })?;
 
             // Return cosmos_msg to transfer funds to the lender
-            return Ok(Some(if is_lp_group.is_some() {
-                WasmMsg::Execute {
-                    contract_addr: lender.to_string(),
-                    msg: to_binary(&shared_types::ProcessPoolHook {
-                        vault_address: env.contract.address.to_string(),
-                        event: if updated_already_claimed < claimable_tokens {
-                            shared_types::VaultEvents::ClaimedRewards {}
-                        } else {
-                            shared_types::VaultEvents::FinalizedClaim {}
-                        },
-                    })?,
-                    funds: vec![Coin {
-                        denom: denom_str,
-                        amount: amount_to_send_to_lender,
-                    }],
-                }
-                .into()
-            } else {
-                get_bank_transfer_to_msg(&lender, &denom_str, amount_to_send_to_lender)
-            }));
+            return Ok(Some(get_bank_transfer_to_msg(
+                &lender,
+                &denom_str,
+                amount_to_send_to_lender,
+            )));
         }
 
         LiquidityRequestOptionState::FixedTermRental {
@@ -175,7 +158,6 @@ pub fn process_lender_claims(
             start_time,
             last_claim_time,
             end_time,
-            is_lp_group,
         } => {
             let current_time = env.block.time;
             let amount_to_send_to_lender = if current_time < end_time {
@@ -205,7 +187,6 @@ pub fn process_lender_claims(
                         start_time,
                         last_claim_time: current_time,
                         end_time,
-                        is_lp_group,
                     });
 
                     Ok(Some(option))
@@ -215,26 +196,11 @@ pub fn process_lender_claims(
             })?;
 
             // Return cosmos_msg to transfer funds to the lender
-            return Ok(Some(if is_lp_group.is_some() {
-                WasmMsg::Execute {
-                    contract_addr: lender.to_string(),
-                    msg: to_binary(&shared_types::ProcessPoolHook {
-                        vault_address: env.contract.address.to_string(),
-                        event: if current_time < end_time {
-                            shared_types::VaultEvents::ClaimedRewards {}
-                        } else {
-                            shared_types::VaultEvents::FinalizedClaim {}
-                        },
-                    })?,
-                    funds: vec![Coin {
-                        denom: denom_str,
-                        amount: amount_to_send_to_lender,
-                    }],
-                }
-                .into()
-            } else {
-                get_bank_transfer_to_msg(&lender, &denom_str, amount_to_send_to_lender)
-            }));
+            return Ok(Some(get_bank_transfer_to_msg(
+                &lender,
+                &denom_str,
+                amount_to_send_to_lender,
+            )));
         }
 
         _default => Ok(None),
