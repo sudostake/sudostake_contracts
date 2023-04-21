@@ -1,5 +1,5 @@
 use crate::{
-    state::{LiquidityRequestOptionState, OPEN_LIQUIDITY_REQUEST},
+    state::{ActiveOption, LiquidityRequestOptionState, OPEN_LIQUIDITY_REQUEST},
     ContractError,
 };
 use cosmwasm_std::{
@@ -277,4 +277,44 @@ pub fn calculate_total_claimed_rewards(
         });
 
     Ok((total_rewards_claimed, distribute_msgs))
+}
+
+pub fn current_lender_can_cast_vote(deps: &DepsMut, env: &Env) -> Result<bool, ContractError> {
+    let mut lender_can_cast_vote = false;
+
+    if let Some(ActiveOption {
+        msg: _,
+        lender: _,
+        state: Some(liquidity_request_state),
+    }) = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?
+    {
+        match liquidity_request_state {
+            LiquidityRequestOptionState::FixedInterestRental {
+                requested_amount: _,
+                can_cast_vote,
+                claimable_tokens: _,
+                already_claimed: _,
+            } => {
+                if can_cast_vote {
+                    lender_can_cast_vote = can_cast_vote;
+                }
+            }
+
+            LiquidityRequestOptionState::FixedTermRental {
+                requested_amount: _,
+                can_cast_vote,
+                start_time: _,
+                last_claim_time: _,
+                end_time,
+            } => {
+                if can_cast_vote && end_time < env.block.time {
+                    lender_can_cast_vote = can_cast_vote;
+                }
+            }
+
+            _default => {}
+        }
+    }
+
+    Ok(lender_can_cast_vote)
 }

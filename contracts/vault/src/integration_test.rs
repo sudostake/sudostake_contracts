@@ -2340,6 +2340,8 @@ mod tests {
 
     #[test]
     fn test_vote() {
-        // todo descrie this
+        // TODO
+        // Test on testnet, until we figure out how to create
+        // a test proposal in multichain
     }
 }

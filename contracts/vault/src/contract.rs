@@ -6,8 +6,8 @@ use crate::state::{
     ActiveOption, Config, LiquidityRequestOptionState, CONFIG, OPEN_LIQUIDITY_REQUEST,
 };
 use cosmwasm_std::{
-    attr, entry_point, to_binary, Addr, Binary, Coin, Deps, DepsMut, Env, MessageInfo, Response,
-    StakingMsg, StdResult, Uint128, VoteOption,
+    attr, entry_point, to_binary, Addr, Binary, Coin, Deps, DepsMut, Env, GovMsg, MessageInfo,
+    Response, StakingMsg, StdResult, Uint128, VoteOption,
 };
 
 // contract info
@@ -723,18 +723,20 @@ pub fn execute_vote(
     vote: VoteOption,
 ) -> Result<Response, ContractError> {
     let mut response = Response::new();
-    // todo
-    //
-    // lender_can_cast_vote = has_active_lro ? (active_option_gives_voting_rights ? true : false) : false
-    //
-    // owner_can_vote = info.sender == owner && !lender_can_cast_vote
-    //
-    // lender_can_vote = info.sender == lender && lender_can_cast_vote
-    //
-    // if owner_can_vote || lender_can_vote {
-    //    response = response.add_message(GovMsg::Vote { proposal_id, vote });
-    // }
-    //
+    let config = CONFIG.load(deps.storage)?;
+    let lender_can_cast_vote = helpers::current_lender_can_cast_vote(&deps, &env)?;
+
+    // Check if owner can cast vote
+    let owner_can_vote = info.sender.eq(&config.owner) && !lender_can_cast_vote;
+
+    // Check if lender can cast vote
+    let lender_can_vote = !info.sender.eq(&config.owner) && lender_can_cast_vote;
+
+    // Add sdk_msg to vote
+    if owner_can_vote || lender_can_vote {
+        response = response.add_message(GovMsg::Vote { proposal_id, vote });
+    }
+
     // respond
     Ok(response.add_attribute("method", "vote"))
 }
