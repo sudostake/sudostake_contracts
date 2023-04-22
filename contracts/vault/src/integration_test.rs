@@ -2342,6 +2342,6 @@ mod tests {
     fn test_vote() {
         // TODO
         // Test on testnet, until we figure out how to create
-        // a test proposal in multichain
+        // a test proposal using multi-test
     }
 }

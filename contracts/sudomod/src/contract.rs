@@ -3,7 +3,7 @@ use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg, InfoResponse};
 use cosmwasm_std::{entry_point, DepsMut, Env, MessageInfo, Response, Deps, StdResult, Binary, to_binary};
 
 // contract info
-pub const CONTRACT_NAME: &str = "accounts_manager_contract";
+pub const CONTRACT_NAME: &str = "sudomod";
 pub const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[cfg_attr(not(feature = "library"), entry_point)]

@@ -10,10 +10,10 @@ SudoStake is a marketplace for trading liquidity request options created by vaul
 
 | Contracts (tag: v0.1.0)                                                        | Description                                                        |
 | :----------------------------------------------------------------------------- | :----------------------------------------------------------------- |
-| [Accounts-Manager](contracts/accounts_manager)                                 | Creates and manages vaults and lp_groups                           |
+| [SudoMod](contracts/sudomod)                                                   | Creates and manages vaults and lp_groups                           |
 | [LP-Group](contracts/lp_group)                                                 | Manages a group of liquidity providers                             |
 | [Token-Swap](contracts/token-swap)                                             | Allows swapping between tokens                                     |
-| [Vault](contracts/vault)                                                       | Allows users to manage staked tokens and liquidity request options |
+| [Vault](contracts/vault)                                                       | Allows users to manage staked tokens and request liquidity         |
 
 &nbsp;
 

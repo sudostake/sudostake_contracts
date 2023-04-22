@@ -3,28 +3,6 @@
 version = 3
 
 [[package]]
-name = "accounts_manager_contract"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "cosmwasm-schema",
- "cosmwasm-std",
- "cosmwasm-storage",
- "cw-multi-test 0.16.2",
- "cw-storage-plus 1.0.1",
- "cw-utils 1.0.1",
- "cw0",
- "cw2 1.0.1",
- "cw20 1.0.1",
- "lp_group_contract",
- "protobuf 3.2.0",
- "schemars",
- "serde",
- "thiserror",
- "vault_contract",
-]
-
-[[package]]
 name = "ahash"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -896,6 +874,27 @@ name = "subtle"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6bdef32e8150c2a081110b42772ffe7d7c9032b606bc226c8260fd97e0976601"
+
+[[package]]
+name = "sudomod"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cosmwasm-schema",
+ "cosmwasm-std",
+ "cosmwasm-storage",
+ "cw-multi-test 0.16.2",
+ "cw-storage-plus 1.0.1",
+ "cw-utils 1.0.1",
+ "cw0",
+ "cw2 1.0.1",
+ "cw20 1.0.1",
+ "protobuf 3.2.0",
+ "schemars",
+ "serde",
+ "thiserror",
+ "vault_contract",
+]
 
 [[package]]
 name = "syn"
