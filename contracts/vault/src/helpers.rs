@@ -73,31 +73,26 @@ pub fn validate_amount_to_delegate(
 }
 
 pub fn get_bank_transfer_to_msg(recipient: &Addr, denom: &str, amount: Uint128) -> CosmosMsg {
-    let transfer_bank_msg = BankMsg::Send {
+    BankMsg::Send {
         to_address: recipient.into(),
         amount: vec![Coin {
             denom: denom.into(),
             amount,
         }],
-    };
-
-    let transfer_bank_cosmos_msg: CosmosMsg = transfer_bank_msg.into();
-    transfer_bank_cosmos_msg
+    }
+    .into()
 }
 
 pub fn has_open_liquidity_request(deps: &DepsMut) -> StdResult<bool> {
-    let data = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?;
-    Ok(data.is_some())
+    Ok(OPEN_LIQUIDITY_REQUEST.load(deps.storage)?.is_some())
 }
 
 pub fn get_amount_for_denom(funds: &[Coin], denom_str: String) -> StdResult<Uint128> {
-    let amount: Uint128 = funds
+    Ok(funds
         .iter()
         .filter(|c| c.denom == denom_str)
         .map(|c| c.amount)
-        .sum();
-
-    Ok(amount)
+        .sum())
 }
 
 pub fn process_lender_claims(
@@ -107,7 +102,7 @@ pub fn process_lender_claims(
     lender: Addr,
     total_rewards_claimed: Uint128,
 ) -> Result<Option<CosmosMsg>, ContractError> {
-    // Get native denom str
+    // Get staking denom str
     let denom_str = deps.querier.query_bonded_denom()?;
 
     // Process liquidity_request variants
@@ -317,4 +312,34 @@ pub fn current_lender_can_cast_vote(deps: &DepsMut, env: &Env) -> Result<bool, C
     }
 
     Ok(lender_can_cast_vote)
+}
+
+pub fn outstanding_fixed_term_loan_debt(
+    deps: &DepsMut,
+    env: &Env,
+) -> Result<Uint128, ContractError> {
+    let mut outstanding_debt = Uint128::zero();
+
+    if let Some(ActiveOption {
+        msg: _,
+        lender: _,
+        state:
+            Some(LiquidityRequestOptionState::FixedTermLoan {
+                requested_amount: _,
+                interest_amount: _,
+                collateral_amount,
+                start_time: _,
+                end_time,
+                already_claimed,
+                last_liquidation_date: _,
+                processing_liquidation: _,
+            }),
+    }) = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?
+    {
+        if env.block.time >= end_time {
+            outstanding_debt = collateral_amount - already_claimed;
+        }
+    }
+
+    Ok(outstanding_debt)
 }

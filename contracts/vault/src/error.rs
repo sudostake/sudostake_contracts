@@ -30,6 +30,11 @@ pub enum ContractError {
     #[error("InsufficientBalance: Required {required:?}, Available {available:?}")]
     InsufficientBalance { required: Coin, available: Coin },
 
+    #[error("Please repay: {amount:?}, owed to the lender for the defaulted fixed term loan first!")]
+    PleaseClearYourDebtFirst {
+        amount: Coin,
+    },
+
     #[error("Custom Error val: {val:?}")]
     CustomError { val: String },
     // Add any other custom errors you like here.

@@ -144,11 +144,7 @@ pub fn execute(
             execute_repay_loan(deps, _env)
         }
         ExecuteMsg::WithdrawBalance { to_address, funds } => {
-            authorize(
-                &deps,
-                _info.sender.clone(),
-                ActionTypes::WithdrawBalance(helpers::has_open_liquidity_request(&deps)?),
-            )?;
+            authorize(&deps, _info.sender.clone(), ActionTypes::WithdrawBalance)?;
             execute_withdraw_balance(deps, _env, to_address, funds)
         }
         ExecuteMsg::Vote { proposal_id, vote } => {
@@ -198,7 +194,7 @@ pub fn execute_redelegate(
 ) -> Result<Response, ContractError> {
     helpers::verify_validator_is_active(&deps, dst_validator.as_str())?;
 
-    // Create sdk_msg for un-staking tokens
+    // Create sdk_msg for re-staking tokens
     let denom_str = deps.querier.query_bonded_denom()?;
     let sdk_msg = StakingMsg::Redelegate {
         src_validator: src_validator.clone(),
@@ -231,8 +227,7 @@ pub fn execute_undelegate(
         .unwrap();
 
     // Verify amount <= validator_delegation
-    if validator_delegation.is_some() {
-        let data = validator_delegation.unwrap();
+    if let Some(data) = validator_delegation {
         if amount > data.amount.amount {
             return Err(ContractError::MaxUndelegateAmountExceeded {
                 amount,
@@ -318,9 +313,13 @@ pub fn execute_open_liquidity_request(
 }
 
 pub fn execute_close_liquidity_request(deps: DepsMut) -> Result<Response, ContractError> {
-    // Check if liquidity reqest already has a lender connected
-    let liquidity_request = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?.unwrap();
-    if liquidity_request.lender.is_some() {
+    // If there is an active liquidity request on the vault, we return Unauthorized
+    if let Some(ActiveOption {
+        msg: _,
+        lender: Some(_lender),
+        state: Some(_state),
+    }) = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?
+    {
         return Err(ContractError::Unauthorized {});
     }
 
@@ -340,7 +339,7 @@ pub fn execute_accept_liquidity_request(
 ) -> Result<Response, ContractError> {
     let option = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?.unwrap();
 
-    // activate the open liquidity request by mapping
+    // Activate the open liquidity request by mapping
     // LiquidityRequestOptionMsg => LiquidityRequestOptionState
     match option.msg {
         LiquidityRequestOptionMsg::FixedInterestRental {
@@ -348,7 +347,7 @@ pub fn execute_accept_liquidity_request(
             claimable_tokens,
             can_cast_vote,
         } => {
-            // verify that the lender is sending the correct requested amount
+            // Verify that the lender is sending the correct requested amount
             let input_amount =
                 helpers::get_amount_for_denom(&info.funds, requested_amount.denom.clone())?;
             if requested_amount.amount != input_amount {
@@ -358,7 +357,7 @@ pub fn execute_accept_liquidity_request(
                 });
             }
 
-            // update state
+            // Update state
             OPEN_LIQUIDITY_REQUEST.update(deps.storage, |data| -> Result<_, ContractError> {
                 let mut option = data.unwrap();
                 option.state = Some(LiquidityRequestOptionState::FixedInterestRental {
@@ -379,7 +378,7 @@ pub fn execute_accept_liquidity_request(
             duration_in_seconds,
             can_cast_vote,
         } => {
-            // verify that the lender is sending the correct requested amount
+            // Verify that the lender is sending the correct requested amount
             let input_amount =
                 helpers::get_amount_for_denom(&info.funds, requested_amount.denom.clone())?;
             if requested_amount.amount != input_amount {
@@ -389,7 +388,7 @@ pub fn execute_accept_liquidity_request(
                 });
             }
 
-            // update state
+            // Update state
             OPEN_LIQUIDITY_REQUEST.update(deps.storage, |data| -> Result<_, ContractError> {
                 let mut option = data.unwrap();
                 option.state = Some(LiquidityRequestOptionState::FixedTermRental {
@@ -412,7 +411,7 @@ pub fn execute_accept_liquidity_request(
             duration_in_seconds,
             collateral_amount,
         } => {
-            // verify that the lender is sending the correct requested amount
+            // Verify that the lender is sending the correct requested amount
             let input_amount =
                 helpers::get_amount_for_denom(&info.funds, requested_amount.denom.clone())?;
             if requested_amount.amount != input_amount {
@@ -422,7 +421,7 @@ pub fn execute_accept_liquidity_request(
                 });
             }
 
-            // update state
+            // Update state
             OPEN_LIQUIDITY_REQUEST.update(deps.storage, |data| -> Result<_, ContractError> {
                 let mut option = data.unwrap();
                 option.state = Some(LiquidityRequestOptionState::FixedTermLoan {
@@ -466,9 +465,9 @@ pub fn execute_claim_delegator_rewards(deps: DepsMut, env: Env) -> Result<Respon
     {
         let lender_claims =
             helpers::process_lender_claims(deps, &env, state, lender, total_rewards_claimed)?;
-        if let Some(msg) = lender_claims {
+        if let Some(transfer_msgs) = lender_claims {
             // Add msg for sending claimed rewards to the lender
-            response = response.add_message(msg);
+            response = response.add_message(transfer_msgs);
         }
     }
 
@@ -479,7 +478,6 @@ pub fn execute_claim_delegator_rewards(deps: DepsMut, env: Env) -> Result<Respon
 }
 
 pub fn execute_repay_loan(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
-    let liquidity_request = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?;
     let mut response = Response::new();
 
     // Check if there is an active FixedTermLoan loan on the vault
@@ -498,7 +496,7 @@ pub fn execute_repay_loan(deps: DepsMut, env: Env) -> Result<Response, ContractE
                 already_claimed: _,
                 processing_liquidation: false,
             }),
-    }) = liquidity_request
+    }) = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?
     {
         // Check if there is enough balance to repay requested_amount + interest_amount
         let repayment_amount = requested_amount.amount + interest_amount;
@@ -560,7 +558,7 @@ pub fn execute_liquidate_collateral(deps: DepsMut, env: Env) -> Result<Response,
             }),
     }) = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?
     {
-        // liquidation on fixed term loans can only happen after expiration date
+        // liquidation on fixed term loans can only happen on/after expiration date
         if env.block.time < end_time {
             return Err(ContractError::Unauthorized {});
         }
@@ -568,12 +566,16 @@ pub fn execute_liquidate_collateral(deps: DepsMut, env: Env) -> Result<Response,
         // Calculate total_available_collateral_balance = available_collateral_balance + total_rewards_claimed
         let config = CONFIG.load(deps.storage)?;
         let denom_str = deps.querier.query_bonded_denom()?;
+
+        // Get current available vault balance
         let available_collateral_balance = helpers::get_amount_for_denom(
             &deps
                 .querier
                 .query_all_balances(env.contract.address.clone())?,
             denom_str.to_string(),
         )?;
+
+        // Claim all available staking rewards and add it to the available balance
         let (total_rewards_claimed, distribute_msgs) =
             helpers::calculate_total_claimed_rewards(&deps, &env)?;
         let total_available_collateral_balance =
@@ -667,7 +669,6 @@ pub fn execute_withdraw_balance(
             .query_all_balances(env.contract.address.clone())?,
         funds.denom.clone(),
     )?;
-
     if available_balance < funds.amount {
         return Err(ContractError::InsufficientBalance {
             available: Coin {
@@ -678,22 +679,39 @@ pub fn execute_withdraw_balance(
         });
     }
 
-    // Get the recipient to send funds to
-    let recipient: Addr;
-    if let Some(val) = to_address {
-        recipient = deps.api.addr_validate(&val)?;
-    } else {
-        let config = CONFIG.load(deps.storage)?;
-        recipient = config.owner;
+    // Check if user is trying to withdraw staking balance, as it is the token used as collateral,
+    // we also check to make sure there is no outstandinding debt from a defaulted fixed term loan
+    // on the vault else we return ContractError::PleaseClearYourDebtFirst {amount: outstanding_amount}
+    let staking_denom = deps.querier.query_bonded_denom()?;
+    let outstanding_debt = helpers::outstanding_fixed_term_loan_debt(&deps, &env)?;
+    if staking_denom.eq(&funds.denom.clone()) && outstanding_debt.gt(&Uint128::zero()) {
+        return Err(ContractError::PleaseClearYourDebtFirst {
+            amount: Coin {
+                amount: outstanding_debt,
+                denom: staking_denom,
+            },
+        });
     }
 
-    // construct sdk msg to transfer funds to recipient
-    let msg = helpers::get_bank_transfer_to_msg(&recipient, &funds.denom, funds.amount);
+    // Get the recipient to send funds to
+    let recipient: Addr = if let Some(val) = to_address {
+        deps.api.addr_validate(&val)?
+    } else {
+        let config = CONFIG.load(deps.storage)?;
+        config.owner
+    };
 
-    Ok(Response::new().add_message(msg).add_attributes(vec![
-        attr("method", "withdraw_balance"),
-        attr("recipient", recipient.to_string()),
-    ]))
+    // Respond
+    Ok(Response::new()
+        .add_message(helpers::get_bank_transfer_to_msg(
+            &recipient,
+            &funds.denom,
+            funds.amount,
+        ))
+        .add_attributes(vec![
+            attr("method", "withdraw_balance"),
+            attr("recipient", recipient.to_string()),
+        ]))
 }
 
 pub fn execute_transfer_ownership(

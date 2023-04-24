@@ -14,10 +14,6 @@ pub enum ExecuteMsg {
     /// which returns a contract address, that is then associated with the `msg.sender`
     CreateVault {},
 
-    /// Creates a new LP_GROUP by calling the instantiate method of the LP_GROUP_CONTRACT,
-    /// which returns a contract address, that is then associated with the `msg.sender`.
-    CreateLPGroup {},
-
     /// Withdraw generated fees to the address provided by the owner
     WithdrawFees { to_address: String },
 

@@ -15,7 +15,7 @@ pub enum ActionTypes {
     Undelegate(WithOpenLiquidityRequest),
     OpenLiquidityRequest(WithOpenLiquidityRequest),
     CloseLiquidityRequest(WithOpenLiquidityRequest),
-    WithdrawBalance(WithOpenLiquidityRequest),
+    WithdrawBalance,
     TransferOwnership,
     AcceptLiquidityRequest,
     ClaimDelegatorRewards,
@@ -35,7 +35,7 @@ const OWNER_AUTHORIZATIONS: [ActionTypes; 11] = [
     ActionTypes::RepayLoan(true),
     ActionTypes::ClaimDelegatorRewards,
     ActionTypes::LiquidateCollateral(true),
-    ActionTypes::WithdrawBalance(false),
+    ActionTypes::WithdrawBalance,
     ActionTypes::Vote,
 ];
 

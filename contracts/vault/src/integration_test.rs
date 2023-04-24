@@ -2102,24 +2102,11 @@ mod tests {
         let vault_c_addr = instantiate_vault(&mut router);
 
         // Step 2
-        // Send some tokens to vault_c_addr
+        // Delegate 600_000 STAKING_DENOM to VALIDATOR_ONE_ADDRESS
+        // Leave 1_000_000 STAKING_DENOM as balance
         // ------------------------------------------------------------------------------
-        let sent_amount = Uint128::new(1_000_000);
-        router
-            .send_tokens(
-                Addr::unchecked(USER),
-                vault_c_addr.clone(),
-                &[Coin {
-                    denom: STAKING_DENOM.to_string(),
-                    amount: sent_amount,
-                }],
-            )
-            .unwrap();
-
-        // Step 3
-        // Delegate to VALIDATOR_ONE_ADDRESS
-        // ------------------------------------------------------------------------------
-        let delegated_amount = Uint128::new(1_000_000);
+        let total_sent_to_vult = Uint128::new(1_600_000);
+        let delegated_amount = Uint128::new(600_000);
         router
             .execute_contract(
                 Addr::unchecked(USER),
@@ -2130,45 +2117,64 @@ mod tests {
                 },
                 &[Coin {
                     denom: STAKING_DENOM.into(),
-                    amount: delegated_amount,
+                    amount: total_sent_to_vult,
                 }],
             )
             .unwrap();
 
+        // Step 3
+        // Withdraw 100_000 STAKING_DENOM leaving 900_000 balance
+        // ------------------------------------------------------------------------------
+        let withdraw_balance_msg = ExecuteMsg::WithdrawBalance {
+            to_address: None,
+            funds: Coin {
+                denom: STAKING_DENOM.to_string(),
+                amount: Uint128::new(100_000),
+            },
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &withdraw_balance_msg,
+                &[],
+            )
+            .unwrap();
+
         // Step 4
-        // Create a valid FixedTermLoan liquidity request
+        // Create a fixed term loan liquidity using 600_000 STAKING_DENOM as collateral
         // ------------------------------------------------------------------------------
         let requested_amount = Uint128::new(300_000);
-        let interest_amount = Uint128::new(30_000);
+        let collateral_amount = Uint128::new(600_000);
         let one_year_duration = 60 * 60 * 24 * 365; // 1 year;
+        let option = LiquidityRequestOptionMsg::FixedTermLoan {
+            requested_amount: Coin {
+                denom: IBC_DENOM_1.to_string(),
+                amount: requested_amount,
+            },
+            interest_amount: Uint128::new(30_000),
+            collateral_amount,
+            duration_in_seconds: one_year_duration,
+        };
         router
             .execute_contract(
                 Addr::unchecked(USER),
                 vault_c_addr.clone(),
                 &ExecuteMsg::OpenLiquidityRequest {
-                    option: LiquidityRequestOptionMsg::FixedTermLoan {
-                        requested_amount: Coin {
-                            denom: IBC_DENOM_1.to_string(),
-                            amount: requested_amount,
-                        },
-                        interest_amount,
-                        collateral_amount: requested_amount,
-                        duration_in_seconds: one_year_duration,
-                    },
+                    option: option.clone(),
                 },
                 &[],
             )
             .unwrap();
 
         // Step 5
-        // Test error case ContractError::Unauthorized {}
-        // due to active liquidity request
+        // Withdraw 100_000 STAKING_DENOM leaving 800_000 balance
         // ------------------------------------------------------------------------------
         let withdraw_balance_msg = ExecuteMsg::WithdrawBalance {
             to_address: None,
             funds: Coin {
                 denom: STAKING_DENOM.to_string(),
-                amount: sent_amount,
+                amount: Uint128::new(100_000),
             },
         };
         router
@@ -2176,47 +2182,47 @@ mod tests {
                 Addr::unchecked(USER),
                 vault_c_addr.clone(),
                 &withdraw_balance_msg,
-                &[],
-            )
-            .unwrap_err();
-
-        // Step 6
-        // Close pending liquidity request
-        // ------------------------------------------------------------------------------
-        let close_liquidity_request_msg = ExecuteMsg::CloseLiquidityRequest {};
-        router
-            .execute_contract(
-                Addr::unchecked(USER),
-                vault_c_addr.clone(),
-                &close_liquidity_request_msg,
                 &[],
             )
             .unwrap();
 
-        // Step 7
-        // Test error case ContractError::Unauthorized {}
-        // when a user not vault owner tries to withdraw balance
+        // Step 6
+        // Accept the fixed term loan
         // ------------------------------------------------------------------------------
-        let wrong_owner = Addr::unchecked("WRONG_OWNER");
+        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest {};
         router
             .execute_contract(
-                wrong_owner,
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &accept_liquidity_request_msg,
+                &[Coin {
+                    denom: IBC_DENOM_1.to_string(),
+                    amount: requested_amount,
+                }],
+            )
+            .unwrap();
+
+        // Step 7
+        // Withdraw 100_000 STAKING_DENOM leaving 700_000 balance
+        // Withdrawal still possible because the fixed term loan has not expired yet
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
                 vault_c_addr.clone(),
                 &withdraw_balance_msg,
                 &[],
             )
-            .unwrap_err();
+            .unwrap();
 
         // Step 8
-        // Test error case ContractError::InsufficientBalance {}
+        // Expire the fixed term loan without repayment
         // ------------------------------------------------------------------------------
-        let withdraw_balance_msg = ExecuteMsg::WithdrawBalance {
-            to_address: None,
-            funds: Coin {
-                denom: STAKING_DENOM.to_string(),
-                amount: sent_amount + sent_amount,
-            },
-        };
+        router.update_block(|block| block.time = block.time.plus_seconds(one_year_duration));
+
+        // Step 8
+        // Try to withdraw some of the balance with ContractError::PleaseClearYourDebtFirst {}
+        // ------------------------------------------------------------------------------
         router
             .execute_contract(
                 Addr::unchecked(USER),
@@ -2227,50 +2233,21 @@ mod tests {
             .unwrap_err();
 
         // Step 9
-        // Withdraw half of the contract balance without providing an optional recipient
+        // Liquidate collateral to clear the debt
         // ------------------------------------------------------------------------------
-        let half = Uint128::new(500_000);
-        let withdraw_balance_msg = ExecuteMsg::WithdrawBalance {
-            to_address: None,
-            funds: Coin {
-                denom: STAKING_DENOM.to_string(),
-                amount: half,
-            },
-        };
+        let liquidation_msg = ExecuteMsg::LiquidateCollateral {};
         router
             .execute_contract(
                 Addr::unchecked(USER),
                 vault_c_addr.clone(),
-                &withdraw_balance_msg,
+                &liquidation_msg,
                 &[],
             )
             .unwrap();
 
         // Step 10
-        // Verify caller's balance
+        // Withdraw the remaining 100_000 STAKING_DENOM from the vault
         // ------------------------------------------------------------------------------
-        let balance = bank_balance(
-            &mut router,
-            &Addr::unchecked(USER),
-            STAKING_DENOM.to_string(),
-        );
-        assert_eq!(
-            balance.amount,
-            Uint128::new(SUPPLY) - delegated_amount - half
-        );
-
-        // Step 11
-        // Withdraw the remaining half of the contract balance
-        // by providing an optional recipient
-        // ------------------------------------------------------------------------------
-        let recipient = Addr::unchecked("recipient");
-        let withdraw_balance_msg = ExecuteMsg::WithdrawBalance {
-            to_address: Some(recipient.to_string()),
-            funds: Coin {
-                denom: STAKING_DENOM.to_string(),
-                amount: half,
-            },
-        };
         router
             .execute_contract(
                 Addr::unchecked(USER),
@@ -2280,17 +2257,18 @@ mod tests {
             )
             .unwrap();
 
-        // Step 12
-        // Verify recipient's balance
+        // Step 11
+        // Verify that the vault balance is 60_000, which is the accumulated
+        // staking rewards claimed during liquidation
         // ------------------------------------------------------------------------------
-        let balance = bank_balance(&mut router, &recipient, STAKING_DENOM.to_string());
-        assert_eq!(balance.amount, half);
-
-        // Step 13
-        // Verify that the contract_addr balance is zero
-        // ------------------------------------------------------------------------------
-        let balance = bank_balance(&mut router, &vault_c_addr, STAKING_DENOM.to_string());
-        assert_eq!(balance.amount, Uint128::zero());
+        let vault_balance = bank_balance(&mut router, &vault_c_addr, STAKING_DENOM.into());
+        assert_eq!(
+            vault_balance,
+            Coin {
+                denom: STAKING_DENOM.to_string(),
+                amount: Uint128::new(60_000)
+            }
+        );
     }
 
     #[test]
