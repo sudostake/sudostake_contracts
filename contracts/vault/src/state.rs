@@ -9,8 +9,6 @@ use crate::msg::LiquidityRequestOptionMsg;
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
     pub owner: Addr,
-    pub acc_manager: Addr,
-    pub liquidation_interval_in_seconds: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

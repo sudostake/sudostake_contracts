@@ -31,7 +31,7 @@ mod tests {
         })
     }
 
-    fn contract_template() -> Box<dyn Contract<Empty>> {
+    fn sudomod_contract_template() -> Box<dyn Contract<Empty>> {
         Box::new(ContractWrapper::new(
             crate::contract::execute,
             crate::contract::instantiate,
@@ -39,8 +39,17 @@ mod tests {
         ))
     }
 
-    fn instantiate_accounts_manager(app: &mut App) -> Addr {
-        let template_id = app.store_code(contract_template());
+    // TODO
+    fn _vault_contract_template() -> Box<dyn Contract<Empty>> {
+        Box::new(ContractWrapper::new(
+            vault_contract::contract::execute,
+            vault_contract::contract::instantiate,
+            vault_contract::contract::query,
+        ))
+    }
+
+    fn instantiate_sudomod(app: &mut App) -> Addr {
+        let template_id = app.store_code(sudomod_contract_template());
 
         let msg = InstantiateMsg {
             staking_denom: STAKING_DENOM.to_string(),
@@ -48,14 +57,21 @@ mod tests {
         };
 
         let template_contract_addr = app
-            .instantiate_contract(template_id, Addr::unchecked(USER), &msg, &[], "accounts_manager", None)
+            .instantiate_contract(
+                template_id,
+                Addr::unchecked(USER),
+                &msg,
+                &[],
+                "sudomod",
+                None,
+            )
             .unwrap();
 
         // return addr
         template_contract_addr
     }
 
-    fn get_accounts_manager_info(app: &mut App, contract_address: &Addr) -> InfoResponse {
+    fn get_sudomod_info(app: &mut App, contract_address: &Addr) -> InfoResponse {
         let msg = QueryMsg::Info {};
         let result: InfoResponse = app.wrap().query_wasm_smart(contract_address, &msg).unwrap();
 
@@ -65,11 +81,11 @@ mod tests {
     #[test]
     fn test_instantiate() {
         let mut app = mock_app();
-        let amm_addr = instantiate_accounts_manager(&mut app);
+        let sudomod_addr = instantiate_sudomod(&mut app);
 
         // Query for the contract info to assert that the lp token and other important
         // data was indeed saved
-        let info = get_accounts_manager_info(&mut app, &amm_addr);
+        let info = get_sudomod_info(&mut app, &sudomod_addr);
 
         assert_eq!(info, InfoResponse {});
     }

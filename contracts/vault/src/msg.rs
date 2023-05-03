@@ -7,7 +7,6 @@ use crate::state::{ActiveOption, Config};
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InstantiateMsg {
     pub owner_address: String,
-    pub account_manager_address: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -27,7 +26,7 @@ pub enum LiquidityRequestOptionMsg {
         requested_amount: Coin,
         /// Implicitly denominated in requested_amount.denom
         interest_amount: Uint128,
-        /// Implicitly denominated in staked tokens
+        /// Implicitly denominated in bonded_denom
         collateral_amount: Uint128,
         duration_in_seconds: u64,
     },
@@ -36,20 +35,20 @@ pub enum LiquidityRequestOptionMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecuteMsg {
-    /// Allows the vault owner to stake the assets to a validator.
+    /// Allows the vault owner to stake their tokens to a validator.
     Delegate {
         validator: String,
         amount: Uint128,
     },
 
-    /// Allows the vault owner to redelegate their stake to another validator.
+    /// Allows the vault owner to redelegate their staked tokens to another validator.
     Redelegate {
         src_validator: String,
         dst_validator: String,
         amount: Uint128,
     },
 
-    /// Allows the vault owner to un-stake the assets from a validator.
+    /// Allows the vault owner to un-stake their tokens from a validator.
     Undelegate {
         validator: String,
         amount: Uint128,
@@ -61,17 +60,17 @@ pub enum ExecuteMsg {
     },
 
     /// Allows the vault owner to close a liquidity request option
-    /// before the offer is accepted by other market participants.
+    /// before the offer is accepted by lenders.
     CloseLiquidityRequest {},
 
-    /// Allows a liquidity provider to accept the pending liquidity request.
+    /// Allows a lender to accept the pending liquidity request.
     AcceptLiquidityRequest {},
 
     // Allows the vault owner(s) to claim delegator rewards
     ClaimDelegatorRewards {},
 
     /// Allows the vault owner to repay the amount borrowed from the lender
-    /// before the expiry date stated in the option
+    /// before a liquidation event is trigged by the lender
     RepayLoan {},
 
     /// Allows the vault owner/lender to liquidate collateral
@@ -80,7 +79,7 @@ pub enum ExecuteMsg {
 
     /// Allows the vault owner/lender to withdraw funds from the vault.
     /// While liquidation is processing, the lender's withdrawal
-    /// is prioritized over the vault owner.
+    /// is prioritized over the vault's owner.
     WithdrawBalance {
         to_address: Option<String>,
         funds: Coin,

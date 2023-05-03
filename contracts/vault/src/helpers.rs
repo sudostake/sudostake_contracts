@@ -41,6 +41,23 @@ pub fn get_available_staking_balace(
     })
 }
 
+pub fn validate_exact_input_amount(
+    coins: &[Coin],
+    given_amount: Uint128,
+    denom_str: String,
+) -> Result<(), ContractError> {
+    let actual_amount = get_amount_for_denom(coins, denom_str)?;
+
+    if actual_amount != given_amount {
+        return Err(ContractError::InvalidInputAmount {
+            required: given_amount,
+            received: actual_amount,
+        });
+    }
+
+    Ok(())
+}
+
 pub fn query_total_delegations(deps: &DepsMut, env: &Env) -> StdResult<Uint128> {
     let total = deps
         .querier

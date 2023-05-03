@@ -13,13 +13,13 @@ mod tests {
     const SUPPLY: u128 = 500_000_000u128;
     const VALIDATOR_ONE_ADDRESS: &str = "validator_one";
     const VALIDATOR_TWO_ADDRESS: &str = "validator_two";
-    const LIQUIDATION_INTREVAL: u64 = 2592000u64; // 60 * 60 * 24 * 30
+    const TEST_INSTANTIATOR_ADDR: &str = "instantiator_addr";
 
     fn mock_app() -> App {
         AppBuilder::new().build(|router, api, storage| {
             let env = mock_env();
 
-            // Set the initial balances
+            // Set the initial balances for USER
             router
                 .bank
                 .init_balance(
@@ -105,11 +105,17 @@ mod tests {
 
         let msg = InstantiateMsg {
             owner_address: USER.to_string(),
-            account_manager_address: USER.to_string(),
         };
 
         let template_contract_addr = app
-            .instantiate_contract(template_id, Addr::unchecked(USER), &msg, &[], "vault", None)
+            .instantiate_contract(
+                template_id,
+                Addr::unchecked(TEST_INSTANTIATOR_ADDR),
+                &msg,
+                &[],
+                "vault",
+                None,
+            )
             .unwrap();
 
         // return addr
@@ -136,8 +142,6 @@ mod tests {
             info.config,
             Config {
                 owner: Addr::unchecked(USER),
-                acc_manager: Addr::unchecked(USER),
-                liquidation_interval_in_seconds: LIQUIDATION_INTREVAL
             }
         );
     }
@@ -1007,6 +1011,24 @@ mod tests {
                 }],
             )
             .unwrap_err();
+
+        // Step 9
+        // Verify that liquidity_request_commission was paid to TEST_INSTANTIATOR_ADDR
+        // The liquidity_request_commission is calculated as 0.3% of requested amount
+        // ------------------------------------------------------------------------------
+        let liquidity_request_commission = Uint128::new(3_000);
+        let instantiator_balance = bank_balance(
+            &mut router,
+            &Addr::unchecked(TEST_INSTANTIATOR_ADDR),
+            IBC_DENOM_1.into(),
+        );
+        assert_eq!(
+            instantiator_balance,
+            Coin {
+                denom: IBC_DENOM_1.to_string(),
+                amount: liquidity_request_commission
+            }
+        );
     }
 
     #[test]
@@ -1125,6 +1147,24 @@ mod tests {
                 }],
             )
             .unwrap_err();
+
+        // Step 8
+        // Verify that liquidity_request_commission was paid to TEST_INSTANTIATOR_ADDR
+        // The liquidity_request_commission is calculated as 0.3% of requested amount
+        // ------------------------------------------------------------------------------
+        let liquidity_request_commission = Uint128::new(3_000);
+        let instantiator_balance = bank_balance(
+            &mut router,
+            &Addr::unchecked(TEST_INSTANTIATOR_ADDR),
+            IBC_DENOM_1.into(),
+        );
+        assert_eq!(
+            instantiator_balance,
+            Coin {
+                denom: IBC_DENOM_1.to_string(),
+                amount: liquidity_request_commission
+            }
+        );
     }
 
     #[test]
@@ -1245,6 +1285,24 @@ mod tests {
                 }],
             )
             .unwrap_err();
+
+        // Step 8
+        // Verify that liquidity_request_commission was paid to TEST_INSTANTIATOR_ADDR
+        // The liquidity_request_commission is calculated as 0.3% of requested amount
+        // ------------------------------------------------------------------------------
+        let liquidity_request_commission = Uint128::new(3_000);
+        let instantiator_balance = bank_balance(
+            &mut router,
+            &Addr::unchecked(TEST_INSTANTIATOR_ADDR),
+            IBC_DENOM_1.into(),
+        );
+        assert_eq!(
+            instantiator_balance,
+            Coin {
+                denom: IBC_DENOM_1.to_string(),
+                amount: liquidity_request_commission
+            }
+        );
     }
 
     #[test]
@@ -1810,7 +1868,11 @@ mod tests {
 
         // Step 8
         // Try to repay the loan correctly by sending the interest_amount to the contract
+        //
+        // We also include the 0.3% liquidity_comission that was deducted and sent to
+        // TEST_INSTANTIATOR_ADDR when the option was accepted
         // ------------------------------------------------------------------------------
+        let liquidity_comission = Uint128::new(900);
         router
             .execute_contract(
                 Addr::unchecked(USER),
@@ -1818,7 +1880,7 @@ mod tests {
                 &repay_loan_msg,
                 &[Coin {
                     denom: IBC_DENOM_1.to_string(),
-                    amount: interest_amount,
+                    amount: interest_amount + liquidity_comission,
                 }],
             )
             .unwrap();
@@ -1837,7 +1899,6 @@ mod tests {
         // has been used to clear the debt
         // ------------------------------------------------------------------------------
         let vault_balance = bank_balance(&mut router, &vault_c_addr, IBC_DENOM_1.into());
-        let lender_balance = bank_balance(&mut router, &Addr::unchecked(USER), IBC_DENOM_1.into());
         assert_eq!(
             vault_balance,
             Coin {
@@ -1845,11 +1906,13 @@ mod tests {
                 amount: Uint128::new(0)
             }
         );
+
+        let lender_balance = bank_balance(&mut router, &Addr::unchecked(USER), IBC_DENOM_1.into());
         assert_eq!(
             lender_balance,
             Coin {
                 denom: IBC_DENOM_1.to_string(),
-                amount: Uint128::new(SUPPLY)
+                amount: Uint128::new(SUPPLY) - liquidity_comission
             }
         );
     }
@@ -2314,12 +2377,5 @@ mod tests {
         // ------------------------------------------------------------------------------
         let info = get_vault_info(&mut router, &vault_c_addr);
         assert_eq!(info.config.owner, Addr::unchecked(new_owner));
-    }
-
-    #[test]
-    fn test_vote() {
-        // TODO
-        // Test on testnet, until we figure out how to create
-        // a test proposal using multi-test
     }
 }

@@ -1,3 +1,4 @@
+use cosmwasm_std::Coin;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -10,15 +11,21 @@ pub struct InstantiateMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecuteMsg {
+    /// Sets the code_id to be used for creating new instances of vaults
+    SetVaultCodeId {},
+
     /// Creates a new vault by calling the instantiate method of the VAULT_CONTRACT,
-    /// which returns a contract address, that is then associated with the `msg.sender`
+    /// which returns a contract address of the new vault
     CreateVault {},
 
-    /// Withdraw generated fees to the address provided by the owner
-    WithdrawFees { to_address: String },
+    /// Allows  owner_address to withdraw funds.
+    WithdrawBalance {
+        to_address: Option<String>,
+        funds: Coin,
+    },
 
-    /// Allows the current owner to transfer ownership to another user.
-    Transfer { to_address: String },
+    /// Allows a vault owner to transfer ownership to another user.
+    TransferOwnership { to_address: String },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
