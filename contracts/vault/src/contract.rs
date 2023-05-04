@@ -12,7 +12,7 @@ use cosmwasm_std::{
 
 const CONTRACT_NAME: &str = "vault_contract";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
-const INSTANTIATOR_ADDR: &str = "instantiator_addr";
+const INSTANTIATOR_ADDR: &str = "contract1";
 const STAKE_LIQUIDATION_INTERVAL: u64 = 60 * 60 * 24 * 30;
 
 #[entry_point]
@@ -34,7 +34,13 @@ pub fn instantiate(
     let owner = deps.api.addr_validate(&msg.owner_address)?;
 
     // Save contract state
-    CONFIG.save(deps.storage, &Config { owner })?;
+    CONFIG.save(
+        deps.storage,
+        &Config {
+            owner,
+            from_code_id: msg.from_code_id,
+        },
+    )?;
 
     // Init OPEN_LIQUIDITY_REQUEST to None
     OPEN_LIQUIDITY_REQUEST.save(deps.storage, &None)?;

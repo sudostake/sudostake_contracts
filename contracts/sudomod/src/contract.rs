@@ -1,6 +1,8 @@
 use crate::error::ContractError;
-use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg, InfoResponse};
-use cosmwasm_std::{entry_point, DepsMut, Env, MessageInfo, Response, Deps, StdResult, Binary, to_binary};
+use crate::msg::{ExecuteMsg, InfoResponse, InstantiateMsg, QueryMsg};
+use cosmwasm_std::{
+    entry_point, to_binary, Binary, Coin, Deps, DepsMut, Env, MessageInfo, Response, StdResult,
+};
 
 // contract info
 pub const CONTRACT_NAME: &str = "sudomod";
@@ -22,13 +24,86 @@ pub fn instantiate(
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn execute(
-    _deps: DepsMut,
-    _env: Env,
-    _info: MessageInfo,
-    _msg: ExecuteMsg,
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
-    // return response
-    Ok(Response::new())
+    match msg {
+        ExecuteMsg::SetVaultCodeId { code_id } => {
+            execute_set_vault_code_id(deps, env, &info, code_id)
+        }
+        ExecuteMsg::SetVaultCreationFee { amount } => {
+            execute_set_vault_creation_fee(deps, env, &info, amount)
+        }
+        ExecuteMsg::MintVault {} => execute_mint_vault(deps, env, &info),
+        ExecuteMsg::WithdrawBalance { to_address, funds } => {
+            execute_withdraw_balance(deps, env, &info, to_address, funds)
+        }
+        ExecuteMsg::TransferOwnership { to_address } => {
+            execute_transfer_ownership(deps, env, &info, to_address)
+        }
+    }
+}
+
+pub fn execute_set_vault_code_id(
+    deps: DepsMut,
+    env: Env,
+    info: &MessageInfo,
+    code_id: u64,
+) -> Result<Response, ContractError> {
+    let mut response = Response::new();
+
+    // respond
+    Ok(response.add_attribute("method", "set_vault_code_id"))
+}
+
+pub fn execute_set_vault_creation_fee(
+    deps: DepsMut,
+    env: Env,
+    info: &MessageInfo,
+    amount: Coin,
+) -> Result<Response, ContractError> {
+    let mut response = Response::new();
+
+    // respond
+    Ok(response.add_attribute("method", "set_vault_creation_fee"))
+}
+
+pub fn execute_mint_vault(
+    deps: DepsMut,
+    env: Env,
+    info: &MessageInfo,
+) -> Result<Response, ContractError> {
+    let mut response = Response::new();
+
+    // respond
+    Ok(response.add_attribute("method", "mint_vault"))
+}
+
+pub fn execute_withdraw_balance(
+    deps: DepsMut,
+    env: Env,
+    info: &MessageInfo,
+    to_address: Option<String>,
+    funds: Coin,
+) -> Result<Response, ContractError> {
+    let mut response = Response::new();
+
+    // respond
+    Ok(response.add_attribute("method", "withdraw_balance"))
+}
+
+pub fn execute_transfer_ownership(
+    deps: DepsMut,
+    env: Env,
+    info: &MessageInfo,
+    to_address: String,
+) -> Result<Response, ContractError> {
+    let mut response = Response::new();
+
+    // respond
+    Ok(response.add_attribute("method", "transfer_ownership"))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]

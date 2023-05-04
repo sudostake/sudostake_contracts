@@ -3,7 +3,7 @@
   "title": "ExecuteMsg",
   "oneOf": [
     {
-      "description": "Allows the vault owner to stake the assets to a validator.",
+      "description": "Allows the vault owner to stake their tokens to a validator.",
       "type": "object",
       "required": [
         "delegate"
@@ -28,7 +28,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Allows the vault owner to redelegate their stake to another validator.",
+      "description": "Allows the vault owner to redelegate their staked tokens to another validator.",
       "type": "object",
       "required": [
         "redelegate"
@@ -57,7 +57,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Allows the vault owner to un-stake the assets from a validator.",
+      "description": "Allows the vault owner to un-stake their tokens from a validator.",
       "type": "object",
       "required": [
         "undelegate"
@@ -103,7 +103,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Allows the vault owner to close a liquidity request option before the offer is accepted by other market participants.",
+      "description": "Allows the vault owner to close a liquidity request option before the offer is accepted by lenders.",
       "type": "object",
       "required": [
         "close_liquidity_request"
@@ -116,7 +116,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Allows a liquidity provider to accept the pending liquidity request.",
+      "description": "Allows a lender to accept the pending liquidity request.",
       "type": "object",
       "required": [
         "accept_liquidity_request"
@@ -141,7 +141,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Allows the vault owner to repay the amount borrowed from the lender before the expiry date stated in the option",
+      "description": "Allows the vault owner to repay the amount borrowed from the lender before a liquidation event is trigged by the lender",
       "type": "object",
       "required": [
         "repay_loan"
@@ -167,7 +167,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Allows the vault owner/lender to withdraw funds from the vault. While liquidation is processing, the lender's withdrawal is prioritized over the vault owner.",
+      "description": "Allows the vault owner/lender to withdraw funds from the vault. While liquidation is processing, the lender's withdrawal is prioritized over the vault's owner.",
       "type": "object",
       "required": [
         "withdraw_balance"
@@ -334,7 +334,7 @@
               ],
               "properties": {
                 "collateral_amount": {
-                  "description": "Implicitly denominated in staked tokens",
+                  "description": "Implicitly denominated in bonded_denom",
                   "allOf": [
                     {
                       "$ref": "#/definitions/Uint128"

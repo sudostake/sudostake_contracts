@@ -6,7 +6,14 @@ use crate::state::{ActiveOption, Config};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InstantiateMsg {
+    /// assigned as the owner of the vault instance
     pub owner_address: String,
+
+    /// from_code_id allows us to easily tell the code_id this vault
+    /// was instantiated from.
+    /// This is especially useful when we want to check if the vault is outdated
+    /// by comparing from_code_id to the vault_code_id on sudomod
+    pub from_code_id: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

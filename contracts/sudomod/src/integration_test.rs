@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::msg::{InfoResponse, InstantiateMsg, QueryMsg};
+    use crate::msg::{ExecuteMsg, InstantiateMsg};
     use cosmwasm_std::{Addr, Coin, Empty, Uint128};
     use cw_multi_test::{App, AppBuilder, Contract, ContractWrapper, Executor};
 
@@ -39,8 +39,7 @@ mod tests {
         ))
     }
 
-    // TODO
-    fn _vault_contract_template() -> Box<dyn Contract<Empty>> {
+    fn vault_contract_template() -> Box<dyn Contract<Empty>> {
         Box::new(ContractWrapper::new(
             vault_contract::contract::execute,
             vault_contract::contract::instantiate,
@@ -51,10 +50,7 @@ mod tests {
     fn instantiate_sudomod(app: &mut App) -> Addr {
         let template_id = app.store_code(sudomod_contract_template());
 
-        let msg = InstantiateMsg {
-            staking_denom: STAKING_DENOM.to_string(),
-            owner_address: USER.to_string(),
-        };
+        let msg = InstantiateMsg {};
 
         let template_contract_addr = app
             .instantiate_contract(
@@ -71,22 +67,47 @@ mod tests {
         template_contract_addr
     }
 
-    fn get_sudomod_info(app: &mut App, contract_address: &Addr) -> InfoResponse {
-        let msg = QueryMsg::Info {};
-        let result: InfoResponse = app.wrap().query_wasm_smart(contract_address, &msg).unwrap();
+    fn setup_sudomod(app: &mut App) -> Addr {
+        // Step 1
+        // We need to create a sudomod instance with contract_address = contract1,
+        // because this is what is hard coded as INSTANTIATOR_ADDR in the vault contract
+        // For testing purposes.
+        //
+        // That is why we call instantiate_sudomod twice
+        // ------------------------------------------------------------------------------
+        instantiate_sudomod(app); // contract0
+        let sudomod_addr = instantiate_sudomod(app); // contract1
 
-        result
+        // Step 2
+        // Set the sudomod_addr as INSTANTIATOR_ADDR on the vault
+        // build, store code and get the vault_code_id
+        // ------------------------------------------------------------------------------
+        let code_id = app.store_code(vault_contract_template());
+
+        // Step 3
+        // Call SetVaultCodeId execute message
+        // ------------------------------------------------------------------------------
+        let execute_msg = ExecuteMsg::SetVaultCodeId { code_id };
+        app.execute_contract(
+            Addr::unchecked(USER),
+            sudomod_addr.clone(),
+            &execute_msg,
+            &[],
+        )
+        .unwrap();
+
+        // TODO check info to make sure data was saved
+
+        // Return the sudomod contract_addr
+        sudomod_addr
     }
 
     #[test]
-    fn test_instantiate() {
+    fn test_create_vault() {
+        // Step 1
+        // Init
+        // ------------------------------------------------------------------------------
         let mut app = mock_app();
-        let sudomod_addr = instantiate_sudomod(&mut app);
-
-        // Query for the contract info to assert that the lp token and other important
-        // data was indeed saved
-        let info = get_sudomod_info(&mut app, &sudomod_addr);
-
-        assert_eq!(info, InfoResponse {});
+        let _sudomod_addr = setup_sudomod(&mut app);
     }
 }

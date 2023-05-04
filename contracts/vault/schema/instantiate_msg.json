@@ -3,13 +3,9 @@
   "title": "InstantiateMsg",
   "type": "object",
   "required": [
-    "account_manager_address",
     "owner_address"
   ],
   "properties": {
-    "account_manager_address": {
-      "type": "string"
-    },
     "owner_address": {
       "type": "string"
     }

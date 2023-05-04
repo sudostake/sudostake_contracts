@@ -13,7 +13,7 @@ mod tests {
     const SUPPLY: u128 = 500_000_000u128;
     const VALIDATOR_ONE_ADDRESS: &str = "validator_one";
     const VALIDATOR_TWO_ADDRESS: &str = "validator_two";
-    const TEST_INSTANTIATOR_ADDR: &str = "instantiator_addr";
+    const TEST_INSTANTIATOR_ADDR: &str = "contract1";
 
     fn mock_app() -> App {
         AppBuilder::new().build(|router, api, storage| {
@@ -100,18 +100,16 @@ mod tests {
             .unwrap()
     }
 
-    fn instantiate_vault(app: &mut App) -> Addr {
-        let template_id = app.store_code(contract_template());
-
-        let msg = InstantiateMsg {
-            owner_address: USER.to_string(),
-        };
-
+    fn instantiate_vault(app: &mut App) -> (Addr, u64) {
+        let code_id = app.store_code(contract_template());
         let template_contract_addr = app
             .instantiate_contract(
-                template_id,
+                code_id,
                 Addr::unchecked(TEST_INSTANTIATOR_ADDR),
-                &msg,
+                &InstantiateMsg {
+                    owner_address: USER.to_string(),
+                    from_code_id: code_id,
+                },
                 &[],
                 "vault",
                 None,
@@ -119,7 +117,7 @@ mod tests {
             .unwrap();
 
         // return addr
-        template_contract_addr
+        (template_contract_addr, code_id)
     }
 
     fn get_vault_info(app: &mut App, contract_address: &Addr) -> InfoResponse {
@@ -131,17 +129,18 @@ mod tests {
 
     #[test]
     fn test_instantiate() {
-        let mut app = mock_app();
-        let vault_c_addr = instantiate_vault(&mut app);
+        let mut router = mock_app();
+        let (vault_c_addr, _from_code_id) = instantiate_vault(&mut router);
 
         // Query for the contract info to assert
         // that all important data was indeed saved
-        let info = get_vault_info(&mut app, &vault_c_addr);
+        let info = get_vault_info(&mut router, &vault_c_addr);
 
         assert_eq!(
             info.config,
             Config {
                 owner: Addr::unchecked(USER),
+                from_code_id: _from_code_id
             }
         );
     }
@@ -152,7 +151,7 @@ mod tests {
         // Instantiate contract instance
         // ------------------------------------------------------------------------------
         let mut router = mock_app();
-        let vault_c_addr = instantiate_vault(&mut router);
+        let (vault_c_addr, _from_code_id) = instantiate_vault(&mut router);
 
         // Step 2
         // Send some tokens to vault_c_addr
@@ -254,7 +253,7 @@ mod tests {
         // Instantiate contract instance
         // ------------------------------------------------------------------------------
         let mut router = mock_app();
-        let vault_c_addr = instantiate_vault(&mut router);
+        let (vault_c_addr, _from_code_id) = instantiate_vault(&mut router);
 
         // Step 2
         // delegate some tokens to VALIDATOR_ONE_ADDRESS
@@ -348,7 +347,7 @@ mod tests {
         // Instantiate contract instance
         // ------------------------------------------------------------------------------
         let mut router = mock_app();
-        let vault_c_addr = instantiate_vault(&mut router);
+        let (vault_c_addr, _from_code_id) = instantiate_vault(&mut router);
 
         // Step 2
         // Send some tokens to vault_c_addr
@@ -458,7 +457,7 @@ mod tests {
         // Instantiate contract instance
         // ------------------------------------------------------------------------------
         let mut router = mock_app();
-        let vault_c_addr = instantiate_vault(&mut router);
+        let (vault_c_addr, _from_code_id) = instantiate_vault(&mut router);
 
         // Step 2
         // Delegate to VALIDATOR_ONE_ADDRESS
@@ -586,7 +585,7 @@ mod tests {
         // Instantiate contract instance
         // ------------------------------------------------------------------------------
         let mut router = mock_app();
-        let vault_c_addr = instantiate_vault(&mut router);
+        let (vault_c_addr, _from_code_id) = instantiate_vault(&mut router);
 
         // Step 2
         // Delegate to VALIDATOR_ONE_ADDRESS
@@ -685,7 +684,7 @@ mod tests {
         // Instantiate contract instance
         // ------------------------------------------------------------------------------
         let mut router = mock_app();
-        let vault_c_addr = instantiate_vault(&mut router);
+        let (vault_c_addr, _from_code_id) = instantiate_vault(&mut router);
 
         // Step 2
         // Delegate to VALIDATOR_ONE_ADDRESS
@@ -785,7 +784,7 @@ mod tests {
         // Instantiate contract instance
         // ------------------------------------------------------------------------------
         let mut router = mock_app();
-        let vault_c_addr = instantiate_vault(&mut router);
+        let (vault_c_addr, _from_code_id) = instantiate_vault(&mut router);
 
         // Step 2
         // Delegate to VALIDATOR_ONE_ADDRESS
@@ -882,7 +881,7 @@ mod tests {
         // Instantiate contract instance
         // ------------------------------------------------------------------------------
         let mut router = mock_app();
-        let vault_c_addr = instantiate_vault(&mut router);
+        let (vault_c_addr, _from_code_id) = instantiate_vault(&mut router);
 
         // Step 2
         // Delegate to VALIDATOR_ONE_ADDRESS
@@ -1037,7 +1036,7 @@ mod tests {
         // Instantiate contract instance
         // ------------------------------------------------------------------------------
         let mut router = mock_app();
-        let vault_c_addr = instantiate_vault(&mut router);
+        let (vault_c_addr, _from_code_id) = instantiate_vault(&mut router);
 
         // Step 2
         // Delegate to VALIDATOR_ONE_ADDRESS
@@ -1173,7 +1172,7 @@ mod tests {
         // Instantiate contract instance
         // ------------------------------------------------------------------------------
         let mut router = mock_app();
-        let vault_c_addr = instantiate_vault(&mut router);
+        let (vault_c_addr, _from_code_id) = instantiate_vault(&mut router);
 
         // Step 2
         // Delegate to VALIDATOR_ONE_ADDRESS
@@ -1311,7 +1310,7 @@ mod tests {
         // Instantiate contract instance
         // ------------------------------------------------------------------------------
         let mut router = mock_app();
-        let vault_c_addr = instantiate_vault(&mut router);
+        let (vault_c_addr, _from_code_id) = instantiate_vault(&mut router);
 
         // Step 2
         // Delegate to VALIDATOR_ONE_ADDRESS
@@ -1390,7 +1389,7 @@ mod tests {
         // Instantiate contract instance
         // ------------------------------------------------------------------------------
         let mut router = mock_app();
-        let vault_c_addr = instantiate_vault(&mut router);
+        let (vault_c_addr, _from_code_id) = instantiate_vault(&mut router);
 
         // Step 2
         // Delegate to VALIDATOR_ONE_ADDRESS
@@ -1571,7 +1570,7 @@ mod tests {
         // Instantiate contract instance
         // ------------------------------------------------------------------------------
         let mut router = mock_app();
-        let vault_c_addr = instantiate_vault(&mut router);
+        let (vault_c_addr, _from_code_id) = instantiate_vault(&mut router);
 
         // Step 2
         // Delegate to VALIDATOR_ONE_ADDRESS
@@ -1760,7 +1759,7 @@ mod tests {
         // Instantiate contract instance
         // ------------------------------------------------------------------------------
         let mut router = mock_app();
-        let vault_c_addr = instantiate_vault(&mut router);
+        let (vault_c_addr, _from_code_id) = instantiate_vault(&mut router);
 
         // Step 2
         // Delegate to VALIDATOR_ONE_ADDRESS
@@ -1923,7 +1922,7 @@ mod tests {
         // Instantiate contract instance
         // ------------------------------------------------------------------------------
         let mut router = mock_app();
-        let vault_c_addr = instantiate_vault(&mut router);
+        let (vault_c_addr, _from_code_id) = instantiate_vault(&mut router);
 
         // Step 2
         // Delegate to VALIDATOR_ONE_ADDRESS & VALIDATOR_TWO_ADDRESS
@@ -2162,7 +2161,7 @@ mod tests {
         // Instantiate contract instance
         // ------------------------------------------------------------------------------
         let mut router = mock_app();
-        let vault_c_addr = instantiate_vault(&mut router);
+        let (vault_c_addr, _from_code_id) = instantiate_vault(&mut router);
 
         // Step 2
         // Delegate 600_000 STAKING_DENOM to VALIDATOR_ONE_ADDRESS
@@ -2340,7 +2339,7 @@ mod tests {
         // Instantiate contract instance
         // ------------------------------------------------------------------------------
         let mut router = mock_app();
-        let vault_c_addr = instantiate_vault(&mut router);
+        let (vault_c_addr, _from_code_id) = instantiate_vault(&mut router);
 
         // Step 2
         // Test error case  ContractError::Unauthorized {}
