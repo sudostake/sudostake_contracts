@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        msg::{ExecuteMsg, InstantiateMsg, QueryMsg},
-        state::Config,
+        msg::{ExecuteMsg, InstantiateMsg, QueryMsg, VaultCodeListResponse},
+        state::{Config, VaultCodeInfo},
     };
     use cosmwasm_std::{Addr, Coin, Empty, Uint128};
     use cw_multi_test::{App, AppBuilder, Contract, ContractWrapper, Executor};
@@ -55,6 +55,14 @@ mod tests {
         app.wrap().query_wasm_smart(contract_address, &msg).unwrap()
     }
 
+    fn get_vault_code_id_list(app: &mut App, contract_address: &Addr) -> VaultCodeListResponse {
+        let msg = QueryMsg::QueryVaultCodeList {
+            start_after: None,
+            limit: None,
+        };
+        app.wrap().query_wasm_smart(contract_address, &msg).unwrap()
+    }
+
     fn bank_balance(router: &mut App, addr: &Addr, denom: String) -> Coin {
         router
             .wrap()
@@ -83,7 +91,6 @@ mod tests {
     }
 
     fn setup_sudomod(app: &mut App) -> Addr {
-        // Step 1
         // We need to create a sudomod instance with contract_address = contract1,
         // because this is what is hard coded as INSTANTIATOR_ADDR in the vault contract
         // For testing purposes.
@@ -93,15 +100,37 @@ mod tests {
         instantiate_sudomod(app); // contract0
         let sudomod_c_addr = instantiate_sudomod(app); // contract1
 
-        // Step 2
-        // Set the sudomod_c_addr as INSTANTIATOR_ADDR on the vault
-        // build, store code and get the vault_code_id
+        // Return the sudomod contract_addr
+        sudomod_c_addr
+    }
+
+    #[test]
+    fn test_set_vault_code_id() {
+        // Step 1
+        // Init
         // ------------------------------------------------------------------------------
+        let mut app = mock_app();
+        let sudomod_c_addr = setup_sudomod(&mut app);
+
+        // Step 2
+        // Test error case ContractError::Unauthorized {}
+        // by calling with the wrong contract owner
+        // -----------------------------------------------------------------------------
+        let wrong_owner = "wrong_owner".to_string();
         let code_id = app.store_code(vault_contract_template());
+        let execute_msg = ExecuteMsg::SetVaultCodeId { code_id };
+        app.execute_contract(
+            Addr::unchecked(wrong_owner),
+            sudomod_c_addr.clone(),
+            &execute_msg,
+            &[],
+        )
+        .unwrap_err();
 
         // Step 3
-        // Call SetVaultCodeId execute message
-        // ------------------------------------------------------------------------------
+        // Set vault code id properly
+        // -----------------------------------------------------------------------------
+        let code_id = app.store_code(vault_contract_template());
         let execute_msg = ExecuteMsg::SetVaultCodeId { code_id };
         app.execute_contract(
             Addr::unchecked(USER),
@@ -112,15 +141,30 @@ mod tests {
         .unwrap();
 
         // Step 4
-        // Call SetVaultCreationFee execute message
-        // ------------------------------------------------------------------------------
-        let amount = Coin {
-            amount: Uint128::new(10_000_000),
-            denom: IBC_DENOM_1.to_string(),
-        };
-        let execute_msg = ExecuteMsg::SetVaultCreationFee {
-            amount: amount.clone(),
-        };
+        // Test error case ContractError::MinVaultCodeUpdateIntervalNotReached {}
+        // by calling before the MIN_VAULT_CODE_UPDATE_INTERVAL is reached
+        // -----------------------------------------------------------------------------
+        let code_id = app.store_code(vault_contract_template());
+        let execute_msg = ExecuteMsg::SetVaultCodeId { code_id };
+        app.execute_contract(
+            Addr::unchecked(USER),
+            sudomod_c_addr.clone(),
+            &execute_msg,
+            &[],
+        )
+        .unwrap_err();
+
+        // Step 5
+        // Move the time forward such that MIN_VAULT_CODE_UPDATE_INTERVAL is exceeded
+        // -----------------------------------------------------------------------------
+        let min_update_interval: u64 = 60 * 60 * 24 * 30;
+        app.update_block(|block| block.time = block.time.plus_seconds(min_update_interval));
+
+        // Step 6
+        // Set vault code id properly
+        // -----------------------------------------------------------------------------
+        let code_id = app.store_code(vault_contract_template());
+        let execute_msg = ExecuteMsg::SetVaultCodeId { code_id };
         app.execute_contract(
             Addr::unchecked(USER),
             sudomod_c_addr.clone(),
@@ -129,21 +173,19 @@ mod tests {
         )
         .unwrap();
 
-        // Step 5
-        // Check info to make sure data was saved correctly
-        // ------------------------------------------------------------------------------
-        let info = get_contract_info(app, &sudomod_c_addr);
+        // Step 7
+        // QueryVaultCodeList to ensure data was stored correctly
+        // -----------------------------------------------------------------------------
+        let vault_code_list = get_vault_code_id_list(&mut app, &sudomod_c_addr);
         assert_eq!(
-            info,
-            Config {
-                owner: Addr::unchecked(USER),
-                vault_code_id: Some(code_id),
-                vault_creation_fee: Some(amount),
+            vault_code_list,
+            VaultCodeListResponse {
+                entries: vec![
+                    VaultCodeInfo { id: 1, code_id: 4 },
+                    VaultCodeInfo { id: 2, code_id: 6 }
+                ]
             }
         );
-
-        // Return the sudomod contract_addr
-        sudomod_c_addr
     }
 
     #[test]
@@ -153,6 +195,8 @@ mod tests {
         // ------------------------------------------------------------------------------
         let mut app = mock_app();
         let _sudomod_c_addr = setup_sudomod(&mut app);
+
+        // todo
     }
 
     #[test]

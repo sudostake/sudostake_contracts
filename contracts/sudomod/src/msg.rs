@@ -2,6 +2,8 @@ use cosmwasm_std::Coin;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::state::VaultCodeInfo;
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InstantiateMsg {}
 
@@ -11,9 +13,6 @@ pub enum ExecuteMsg {
     /// Allows owner_address to set vault code id, to be used
     /// when creating new instances of vaults
     SetVaultCodeId { code_id: u64 },
-
-    /// Allows owner_address to set vault creation fee
-    SetVaultCreationFee { amount: Coin },
 
     /// Creates a new vault by calling the instantiate method of the VAULT_CONTRACT,
     /// which returns a contract address of the new vault.
@@ -34,4 +33,15 @@ pub enum ExecuteMsg {
 pub enum QueryMsg {
     /// Returns Config
     Info {},
+
+    /// Returns VaultCodeListResponse
+    QueryVaultCodeList {
+        start_after: Option<u64>,
+        limit: Option<u32>,
+    },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct VaultCodeListResponse {
+    pub entries: Vec<VaultCodeInfo>,
 }

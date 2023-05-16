@@ -1,11 +1,15 @@
 use crate::error::ContractError;
 use crate::helpers;
-use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
-use crate::state::{Config, CONFIG};
-use cosmwasm_std::{
-    attr, entry_point, to_binary, Addr, Binary, Coin, Deps, DepsMut, Env, MessageInfo, Response,
-    StdResult,
+use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg, VaultCodeListResponse};
+use crate::state::{
+    Config, VaultCodeInfo, CONFIG, DEFAULT_LIMIT, ENTRY_SEQ, MAX_LIMIT, VAULT_CODE_LIST,
 };
+use cosmwasm_std::{
+    attr, entry_point, to_binary, Addr, Binary, Coin, Deps, DepsMut, Env, MessageInfo, Order,
+    Response, StdResult,
+};
+use cw_storage_plus::Bound;
+use std::ops::Add;
 
 // contract info
 const CONTRACT_NAME: &str = "sudomod";
@@ -26,10 +30,12 @@ pub fn instantiate(
         deps.storage,
         &Config {
             owner: info.sender,
-            vault_code_id: None,
-            vault_creation_fee: None,
+            last_vault_info_update: None,
         },
     )?;
+
+    // save the entry sequence to storage starting from 0
+    ENTRY_SEQ.save(deps.storage, &0u64)?;
 
     // return response
     Ok(Response::new().add_attribute("method", "instantiate"))
@@ -43,9 +49,8 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::SetVaultCodeId { code_id } => execute_set_vault_code_id(deps, &info, code_id),
-        ExecuteMsg::SetVaultCreationFee { amount } => {
-            execute_set_vault_creation_fee(deps, &info, amount)
+        ExecuteMsg::SetVaultCodeId { code_id } => {
+            execute_set_vault_code_id(deps, env, &info, code_id)
         }
         ExecuteMsg::MintVault {} => execute_mint_vault(deps, env, &info),
         ExecuteMsg::WithdrawBalance { to_address, funds } => {
@@ -57,49 +62,34 @@ pub fn execute(
     }
 }
 
-fn verify_caller_is_owner(info: &MessageInfo, deps: &DepsMut) -> Result<(), ContractError> {
-    let config = CONFIG.load(deps.storage)?;
-    let is_owner = info.sender.eq(&config.owner);
-
-    if !is_owner {
-        return Err(ContractError::Unauthorized {});
-    }
-
-    Ok(())
-}
-
 pub fn execute_set_vault_code_id(
     deps: DepsMut,
+    env: Env,
     info: &MessageInfo,
     code_id: u64,
 ) -> Result<Response, ContractError> {
-    verify_caller_is_owner(&info, &deps)?;
+    helpers::verify_caller_is_owner(&info, &deps)?;
 
-    // Set code_id to be used for creating new instances of vaults
+    // Checks if user can update vault code info
+    helpers::can_update_vault_code_info(&deps, &env)?;
+
+    // in order to generate a new seq_id, we get the ENTRY_SEQ and increment it by 1
+    let id = ENTRY_SEQ.update::<_, cosmwasm_std::StdError>(deps.storage, |id| Ok(id.add(1)))?;
+
+    // save the new entry to the vault code list
+    VAULT_CODE_LIST.save(deps.storage, id, &VaultCodeInfo { id, code_id })?;
+
+    // Update last_vault_info_update
     CONFIG.update(deps.storage, |mut data| -> Result<_, ContractError> {
-        data.vault_code_id = Some(code_id);
+        data.last_vault_info_update = Some(env.block.time);
         Ok(data)
     })?;
 
     // return response
-    Ok(Response::new().add_attribute("method", "set_vault_code_id"))
-}
-
-pub fn execute_set_vault_creation_fee(
-    deps: DepsMut,
-    info: &MessageInfo,
-    amount: Coin,
-) -> Result<Response, ContractError> {
-    verify_caller_is_owner(&info, &deps)?;
-
-    // Set vault creation fee to be paid by users who wants to create a new vault
-    CONFIG.update(deps.storage, |mut data| -> Result<_, ContractError> {
-        data.vault_creation_fee = Some(amount);
-        Ok(data)
-    })?;
-
-    // return response
-    Ok(Response::new().add_attribute("method", "set_vault_creation_fee"))
+    Ok(Response::new()
+        .add_attribute("method", "set_vault_code_id")
+        .add_attribute("code_id", code_id.to_string())
+        .add_attribute("seq_id", id.to_string()))
 }
 
 pub fn execute_mint_vault(
@@ -107,11 +97,10 @@ pub fn execute_mint_vault(
     env: Env,
     info: &MessageInfo,
 ) -> Result<Response, ContractError> {
-    // TODO
-    let mut response = Response::new();
+    // todo
+    // Describe this
 
-    // return response
-    Ok(response.add_attribute("method", "mint_vault"))
+    Ok(Response::new().add_attribute("method", "mint_vault"))
 }
 
 pub fn execute_withdraw_balance(
@@ -121,7 +110,7 @@ pub fn execute_withdraw_balance(
     to_address: Option<String>,
     funds: Coin,
 ) -> Result<Response, ContractError> {
-    verify_caller_is_owner(&info, &deps)?;
+    helpers::verify_caller_is_owner(&info, &deps)?;
 
     // Check if the contract balance is >= the requested amount to withdraw
     let available_balance = helpers::get_amount_for_denom(
@@ -166,7 +155,7 @@ pub fn execute_transfer_ownership(
     info: &MessageInfo,
     to_address: String,
 ) -> Result<Response, ContractError> {
-    verify_caller_is_owner(&info, &deps)?;
+    helpers::verify_caller_is_owner(&info, &deps)?;
 
     // validate the new owner_address
     let new_owner = deps.api.addr_validate(&to_address)?;
@@ -187,10 +176,34 @@ pub fn execute_transfer_ownership(
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Info {} => to_binary(&query_info(deps)?),
+        QueryMsg::QueryVaultCodeList { start_after, limit } => {
+            to_binary(&query_vault_code_info_list(deps, start_after, limit)?)
+        }
     }
 }
 
 pub fn query_info(_deps: Deps) -> StdResult<Config> {
     let config = CONFIG.load(_deps.storage)?;
     Ok(config)
+}
+
+fn query_vault_code_info_list(
+    deps: Deps,
+    start_after: Option<u64>,
+    limit: Option<u32>,
+) -> StdResult<VaultCodeListResponse> {
+    let start = start_after.map(Bound::exclusive);
+    let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
+
+    // Get the entries that matches the range
+    let entries: StdResult<Vec<_>> = VAULT_CODE_LIST
+        .range(deps.storage, start, None, Order::Ascending)
+        .take(limit)
+        .collect();
+
+    let results = VaultCodeListResponse {
+        entries: entries?.into_iter().map(|l| l.1).collect(),
+    };
+
+    Ok(results)
 }
