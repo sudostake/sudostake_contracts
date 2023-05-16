@@ -1,17 +1,5 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "InstantiateMsg",
-  "type": "object",
-  "required": [
-    "owner_address",
-    "staking_denom"
-  ],
-  "properties": {
-    "owner_address": {
-      "type": "string"
-    },
-    "staking_denom": {
-      "type": "string"
-    }
-  }
+  "type": "object"
 }

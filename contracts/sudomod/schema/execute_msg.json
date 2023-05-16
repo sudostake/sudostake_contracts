@@ -3,26 +3,57 @@
   "title": "ExecuteMsg",
   "oneOf": [
     {
-      "description": "Sets the code_id to be used for creating new instances of vaults",
+      "description": "Allows owner_address to set vault code id, to be used when creating new instances of vaults",
       "type": "object",
       "required": [
         "set_vault_code_id"
       ],
       "properties": {
         "set_vault_code_id": {
-          "type": "object"
+          "type": "object",
+          "required": [
+            "code_id"
+          ],
+          "properties": {
+            "code_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
         }
       },
       "additionalProperties": false
     },
     {
-      "description": "Creates a new vault by calling the instantiate method of the VAULT_CONTRACT, which returns a contract address of the new vault",
+      "description": "Allows owner_address to set vault creation fee",
       "type": "object",
       "required": [
-        "create_vault"
+        "set_vault_creation_fee"
       ],
       "properties": {
-        "create_vault": {
+        "set_vault_creation_fee": {
+          "type": "object",
+          "required": [
+            "amount"
+          ],
+          "properties": {
+            "amount": {
+              "$ref": "#/definitions/Coin"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Creates a new vault by calling the instantiate method of the VAULT_CONTRACT, which returns a contract address of the new vault.",
+      "type": "object",
+      "required": [
+        "mint_vault"
+      ],
+      "properties": {
+        "mint_vault": {
           "type": "object"
         }
       },

@@ -1,25 +1,36 @@
 use crate::error::ContractError;
-use crate::msg::{ExecuteMsg, InfoResponse, InstantiateMsg, QueryMsg};
+use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
+use crate::state::{Config, CONFIG};
 use cosmwasm_std::{
-    entry_point, to_binary, Binary, Coin, Deps, DepsMut, Env, MessageInfo, Response, StdResult,
+    attr, entry_point, to_binary, Binary, Coin, Deps, DepsMut, Env, MessageInfo, Response, StdResult,
 };
 
 // contract info
-pub const CONTRACT_NAME: &str = "sudomod";
-pub const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
+const CONTRACT_NAME: &str = "sudomod";
+const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
-    _deps: DepsMut,
+    deps: DepsMut,
     _env: Env,
-    _info: MessageInfo,
+    info: MessageInfo,
     _msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
     // Store the contract name and version
-    cw2::set_contract_version(_deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
+    cw2::set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
+
+    // set the owner as info.sender
+    CONFIG.save(
+        deps.storage,
+        &Config {
+            owner: info.sender,
+            vault_code_id: None,
+            vault_creation_fee: None,
+        },
+    )?;
 
     // return response
-    Ok(Response::new())
+    Ok(Response::new().add_attribute("method", "instantiate"))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -30,44 +41,63 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::SetVaultCodeId { code_id } => {
-            execute_set_vault_code_id(deps, env, &info, code_id)
-        }
+        ExecuteMsg::SetVaultCodeId { code_id } => execute_set_vault_code_id(deps, &info, code_id),
         ExecuteMsg::SetVaultCreationFee { amount } => {
-            execute_set_vault_creation_fee(deps, env, &info, amount)
+            execute_set_vault_creation_fee(deps, &info, amount)
         }
         ExecuteMsg::MintVault {} => execute_mint_vault(deps, env, &info),
         ExecuteMsg::WithdrawBalance { to_address, funds } => {
             execute_withdraw_balance(deps, env, &info, to_address, funds)
         }
         ExecuteMsg::TransferOwnership { to_address } => {
-            execute_transfer_ownership(deps, env, &info, to_address)
+            execute_transfer_ownership(deps, &info, to_address)
         }
     }
 }
 
+fn verify_caller_is_owner(info: &MessageInfo, deps: &DepsMut) -> Result<(), ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+    let is_owner = info.sender.eq(&config.owner);
+
+    if !is_owner {
+        return Err(ContractError::Unauthorized {});
+    }
+
+    Ok(())
+}
+
 pub fn execute_set_vault_code_id(
     deps: DepsMut,
-    env: Env,
     info: &MessageInfo,
     code_id: u64,
 ) -> Result<Response, ContractError> {
-    let mut response = Response::new();
+    verify_caller_is_owner(&info, &deps)?;
 
-    // respond
-    Ok(response.add_attribute("method", "set_vault_code_id"))
+    // Set code_id to be used for creating new instances of vaults
+    CONFIG.update(deps.storage, |mut data| -> Result<_, ContractError> {
+        data.vault_code_id = Some(code_id);
+        Ok(data)
+    })?;
+
+    // return response
+    Ok(Response::new().add_attribute("method", "set_vault_code_id"))
 }
 
 pub fn execute_set_vault_creation_fee(
     deps: DepsMut,
-    env: Env,
     info: &MessageInfo,
     amount: Coin,
 ) -> Result<Response, ContractError> {
-    let mut response = Response::new();
+    verify_caller_is_owner(&info, &deps)?;
 
-    // respond
-    Ok(response.add_attribute("method", "set_vault_creation_fee"))
+    // Set vault creation fee to be paid by users who wants to create a new vault
+    CONFIG.update(deps.storage, |mut data| -> Result<_, ContractError> {
+        data.vault_creation_fee = Some(amount);
+        Ok(data)
+    })?;
+
+    // return response
+    Ok(Response::new().add_attribute("method", "set_vault_creation_fee"))
 }
 
 pub fn execute_mint_vault(
@@ -75,9 +105,10 @@ pub fn execute_mint_vault(
     env: Env,
     info: &MessageInfo,
 ) -> Result<Response, ContractError> {
+    // TODO
     let mut response = Response::new();
 
-    // respond
+    // return response
     Ok(response.add_attribute("method", "mint_vault"))
 }
 
@@ -88,22 +119,35 @@ pub fn execute_withdraw_balance(
     to_address: Option<String>,
     funds: Coin,
 ) -> Result<Response, ContractError> {
+    verify_caller_is_owner(&info, &deps)?;
+
+    // TODO
     let mut response = Response::new();
 
-    // respond
+    // return response
     Ok(response.add_attribute("method", "withdraw_balance"))
 }
 
 pub fn execute_transfer_ownership(
     deps: DepsMut,
-    env: Env,
     info: &MessageInfo,
     to_address: String,
 ) -> Result<Response, ContractError> {
-    let mut response = Response::new();
+    verify_caller_is_owner(&info, &deps)?;
 
-    // respond
-    Ok(response.add_attribute("method", "transfer_ownership"))
+    // validate the new owner_address
+    let new_owner = deps.api.addr_validate(&to_address)?;
+
+    // Set the new owner of this vault
+    CONFIG.update(deps.storage, |mut data| -> Result<_, ContractError> {
+        data.owner = new_owner;
+        Ok(data)
+    })?;
+
+    Ok(Response::new().add_attributes(vec![
+        attr("method", "transfer_ownership"),
+        attr("to_address", to_address.to_string()),
+    ]))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -113,6 +157,7 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     }
 }
 
-pub fn query_info(_deps: Deps) -> StdResult<InfoResponse> {
-    Ok(InfoResponse {})
+pub fn query_info(_deps: Deps) -> StdResult<Config> {
+    let config = CONFIG.load(_deps.storage)?;
+    Ok(config)
 }
