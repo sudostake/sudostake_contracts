@@ -1,10 +1,13 @@
-use cosmwasm_std::StdError;
+use cosmwasm_std::{StdError, Coin};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum ContractError {
     #[error("{0}")]
     Std(#[from] StdError),
+
+    #[error("InsufficientBalance: Required {required:?}, Available {available:?}")]
+    InsufficientBalance { required: Coin, available: Coin },
 
     #[error("Unauthorized")]
     Unauthorized {},

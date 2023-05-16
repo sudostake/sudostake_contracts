@@ -55,6 +55,13 @@ mod tests {
         app.wrap().query_wasm_smart(contract_address, &msg).unwrap()
     }
 
+    fn bank_balance(router: &mut App, addr: &Addr, denom: String) -> Coin {
+        router
+            .wrap()
+            .query_balance(addr.to_string(), denom)
+            .unwrap()
+    }
+
     fn instantiate_sudomod(app: &mut App) -> Addr {
         let template_id = app.store_code(sudomod_contract_template());
 
@@ -191,5 +198,132 @@ mod tests {
         // ------------------------------------------------------------------------------
         let info = get_contract_info(&mut router, &sudomod_c_addr);
         assert_eq!(info.owner, Addr::unchecked(new_owner));
+    }
+
+    #[test]
+    fn test_withdraw_balance() {
+        // Step 1
+        // Instantiate contract instance
+        // ------------------------------------------------------------------------------
+        let mut router = mock_app();
+        let sudomod_c_addr = setup_sudomod(&mut router);
+
+        // Step 2
+        // Send some tokens to sudomod_c_addr
+        // ------------------------------------------------------------------------------
+        let amount = Uint128::new(1_000_000);
+        router
+            .send_tokens(
+                Addr::unchecked(USER),
+                sudomod_c_addr.clone(),
+                &[Coin {
+                    denom: STAKING_DENOM.to_string(),
+                    amount,
+                }],
+            )
+            .unwrap();
+
+        // Step 3
+        // Test error case ContractError::Unauthorized {}
+        // ------------------------------------------------------------------------------
+        let wrong_owner = Addr::unchecked("WRONG_OWNER");
+        let withdraw_balance_msg = ExecuteMsg::WithdrawBalance {
+            to_address: None,
+            funds: Coin {
+                denom: STAKING_DENOM.to_string(),
+                amount: amount,
+            },
+        };
+        router
+            .execute_contract(
+                wrong_owner,
+                sudomod_c_addr.clone(),
+                &withdraw_balance_msg,
+                &[],
+            )
+            .unwrap_err();
+
+        // Step 4
+        // Test error case ContractError::InsufficientBalance {}
+        // when trying to withdraw more than the available contract balance
+        // ------------------------------------------------------------------------------
+        let withdraw_balance_msg = ExecuteMsg::WithdrawBalance {
+            to_address: None,
+            funds: Coin {
+                denom: STAKING_DENOM.to_string(),
+                amount: amount + amount,
+            },
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                sudomod_c_addr.clone(),
+                &withdraw_balance_msg,
+                &[],
+            )
+            .unwrap_err();
+
+        // Step 5
+        // Withdraw half of the contract balance without providing an optional recipient
+        // ------------------------------------------------------------------------------
+        let half = Uint128::new(500_000);
+        let withdraw_balance_msg = ExecuteMsg::WithdrawBalance {
+            to_address: None,
+            funds: Coin {
+                denom: STAKING_DENOM.to_string(),
+                amount: half,
+            },
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                sudomod_c_addr.clone(),
+                &withdraw_balance_msg,
+                &[],
+            )
+            .unwrap();
+
+        // Step 6
+        // Verify caller's balance
+        // ------------------------------------------------------------------------------
+        let balance = bank_balance(
+            &mut router,
+            &Addr::unchecked(USER),
+            STAKING_DENOM.to_string(),
+        );
+        assert_eq!(balance.amount, Uint128::new(SUPPLY) - half);
+
+        // Step 7
+        // Withdraw the remaining half of the contract balance
+        // by providing an optional recipient
+        // ------------------------------------------------------------------------------
+        let recipient = Addr::unchecked("recipient");
+        let withdraw_balance_msg = ExecuteMsg::WithdrawBalance {
+            to_address: Some(recipient.to_string()),
+            funds: Coin {
+                denom: STAKING_DENOM.to_string(),
+                amount: half,
+            },
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                sudomod_c_addr.clone(),
+                &withdraw_balance_msg,
+                &[],
+            )
+            .unwrap();
+
+        // Step 8
+        // Verify recipient's balance
+        // ------------------------------------------------------------------------------
+        let balance = bank_balance(&mut router, &recipient, STAKING_DENOM.to_string());
+        assert_eq!(balance.amount, half);
+
+        // Step 9
+        // Verify that the contract_addr balance is zero
+        // ------------------------------------------------------------------------------
+        let balance = bank_balance(&mut router, &sudomod_c_addr, STAKING_DENOM.to_string());
+        assert_eq!(balance.amount, Uint128::zero());
     }
 }

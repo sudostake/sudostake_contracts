@@ -1,8 +1,10 @@
 use crate::error::ContractError;
+use crate::helpers;
 use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
 use crate::state::{Config, CONFIG};
 use cosmwasm_std::{
-    attr, entry_point, to_binary, Binary, Coin, Deps, DepsMut, Env, MessageInfo, Response, StdResult,
+    attr, entry_point, to_binary, Addr, Binary, Coin, Deps, DepsMut, Env, MessageInfo, Response,
+    StdResult,
 };
 
 // contract info
@@ -121,11 +123,42 @@ pub fn execute_withdraw_balance(
 ) -> Result<Response, ContractError> {
     verify_caller_is_owner(&info, &deps)?;
 
-    // TODO
-    let mut response = Response::new();
+    // Check if the contract balance is >= the requested amount to withdraw
+    let available_balance = helpers::get_amount_for_denom(
+        &deps
+            .querier
+            .query_all_balances(env.contract.address.clone())?,
+        funds.denom.clone(),
+    )?;
+    if available_balance < funds.amount {
+        return Err(ContractError::InsufficientBalance {
+            available: Coin {
+                amount: available_balance,
+                denom: funds.denom.clone(),
+            },
+            required: funds,
+        });
+    }
 
-    // return response
-    Ok(response.add_attribute("method", "withdraw_balance"))
+    // Get the recipient to send funds to
+    let recipient: Addr = if let Some(val) = to_address {
+        deps.api.addr_validate(&val)?
+    } else {
+        let config = CONFIG.load(deps.storage)?;
+        config.owner
+    };
+
+    // Respond
+    Ok(Response::new()
+        .add_message(helpers::get_bank_transfer_to_msg(
+            &recipient,
+            &funds.denom,
+            funds.amount,
+        ))
+        .add_attributes(vec![
+            attr("method", "withdraw_balance"),
+            attr("recipient", recipient.to_string()),
+        ]))
 }
 
 pub fn execute_transfer_ownership(

@@ -3,7 +3,7 @@
   "title": "QueryMsg",
   "oneOf": [
     {
-      "description": "Returns InfoResponse",
+      "description": "Returns Config",
       "type": "object",
       "required": [
         "info"
