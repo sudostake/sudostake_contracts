@@ -15,6 +15,9 @@ use std::ops::Add;
 const CONTRACT_NAME: &str = "sudomod";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+// This tracks the reply from calling the vault contract instantiate submessage
+const MINT_VAULT_REPLY_ID: u64 = 1u64;
+
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
     deps: DepsMut,
@@ -31,6 +34,7 @@ pub fn instantiate(
         &Config {
             owner: info.sender,
             last_vault_info_update: None,
+            vault_creation_fee: None,
         },
     )?;
 
@@ -51,6 +55,9 @@ pub fn execute(
     match msg {
         ExecuteMsg::SetVaultCodeId { code_id } => {
             execute_set_vault_code_id(deps, env, &info, code_id)
+        }
+        ExecuteMsg::SetVaultCreationFee { amount } => {
+            execute_set_vault_creation_fee(deps, &info, amount)
         }
         ExecuteMsg::MintVault {} => execute_mint_vault(deps, env, &info),
         ExecuteMsg::WithdrawBalance { to_address, funds } => {
@@ -92,13 +99,34 @@ pub fn execute_set_vault_code_id(
         .add_attribute("seq_id", id.to_string()))
 }
 
+pub fn execute_set_vault_creation_fee(
+    deps: DepsMut,
+    info: &MessageInfo,
+    amount: Coin,
+) -> Result<Response, ContractError> {
+    helpers::verify_caller_is_owner(&info, &deps)?;
+
+    // Update vault_creation_fee
+    CONFIG.update(deps.storage, |mut data| -> Result<_, ContractError> {
+        data.vault_creation_fee = Some(amount.clone());
+        Ok(data)
+    })?;
+
+    // return response
+    Ok(Response::new()
+        .add_attribute("method", "set_vault_creation_fee")
+        .add_attribute("amount", amount.to_string()))
+}
+
 pub fn execute_mint_vault(
     deps: DepsMut,
     env: Env,
     info: &MessageInfo,
 ) -> Result<Response, ContractError> {
-    // todo
-    // Describe this
+    // verify that caller sends the correct vault_creation_fee
+    // add submessage to create a new vault
+    // we do not want a reply but it should fail silently in the event
+    // of an error in the sub contract
 
     Ok(Response::new().add_attribute("method", "mint_vault"))
 }

@@ -14,6 +14,9 @@ pub enum ExecuteMsg {
     /// when creating new instances of vaults
     SetVaultCodeId { code_id: u64 },
 
+    /// Allows owner_address to set the vault creation fee
+    SetVaultCreationFee { amount: Coin },
+
     /// Creates a new vault by calling the instantiate method of the VAULT_CONTRACT,
     /// which returns a contract address of the new vault.
     MintVault {},

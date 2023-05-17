@@ -189,6 +189,53 @@ mod tests {
     }
 
     #[test]
+    fn test_set_vault_creation_fee() {
+        // Step 1
+        // Init
+        // ------------------------------------------------------------------------------
+        let mut app = mock_app();
+        let sudomod_c_addr = setup_sudomod(&mut app);
+
+        // Step 2
+        // Test error case ContractError::Unauthorized {}
+        // by calling with the wrong contract owner
+        // -----------------------------------------------------------------------------
+        let vault_creation_fee = Coin {
+            amount: Uint128::new(10_000_000),
+            denom: IBC_DENOM_1.to_string(),
+        };
+
+        let wrong_owner = "wrong_owner".to_string();
+        let execute_msg = ExecuteMsg::SetVaultCreationFee {
+            amount: vault_creation_fee.clone(),
+        };
+        app.execute_contract(
+            Addr::unchecked(wrong_owner),
+            sudomod_c_addr.clone(),
+            &execute_msg,
+            &[],
+        )
+        .unwrap_err();
+
+        // Step 3
+        // Set vault creation fee  properly
+        // -----------------------------------------------------------------------------
+        app.execute_contract(
+            Addr::unchecked(USER),
+            sudomod_c_addr.clone(),
+            &execute_msg,
+            &[],
+        )
+        .unwrap();
+
+        // Step 4
+        // Query sudomod info to verify the new vault_creation_fee is set
+        // ------------------------------------------------------------------------------
+        let info = get_contract_info(&mut app, &sudomod_c_addr);
+        assert_eq!(info.vault_creation_fee, Some(vault_creation_fee));
+    }
+
+    #[test]
     fn test_mint_vault() {
         // Step 1
         // Init
