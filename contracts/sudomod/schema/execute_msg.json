@@ -26,7 +26,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Allows owner_address to set vault creation fee",
+      "description": "Allows owner_address to set an amount to be paid by info.sender when calling MintVault.",
       "type": "object",
       "required": [
         "set_vault_creation_fee"
@@ -47,7 +47,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Creates a new vault by calling the instantiate method of the VAULT_CONTRACT, which returns a contract address of the new vault.",
+      "description": "Ensures that all instances of vaults created from code_id is paid for, as only the instance of sudomod contract set as INSTANTIATOR_ADDR in the vault contract's source code can call the instantiate method of the VAULT_CONTRACT",
       "type": "object",
       "required": [
         "mint_vault"
@@ -60,7 +60,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Allows  owner_address to withdraw funds.",
+      "description": "Allows owner_address to withdraw funds from the contract account.",
       "type": "object",
       "required": [
         "withdraw_balance"
@@ -87,7 +87,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Allows a vault owner to transfer ownership to another user.",
+      "description": "Allows owner_address to transfer ownership to another owner's address.",
       "type": "object",
       "required": [
         "transfer_ownership"

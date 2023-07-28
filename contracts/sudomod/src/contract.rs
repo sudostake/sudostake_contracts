@@ -2,21 +2,15 @@ use crate::error::ContractError;
 use crate::helpers;
 use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg, VaultCodeListResponse};
 use crate::state::{
-    Config, VaultCodeInfo, CONFIG, DEFAULT_LIMIT, ENTRY_SEQ, MAX_LIMIT, VAULT_CODE_LIST,
+    Config, VaultCodeInfo, CONFIG, VAULT_CODE_LIST, VAULT_CODE_SEQ, VAULT_INSTANTIATION_SEQ,
 };
+use crate::state::{CONTRACT_NAME, CONTRACT_VERSION, DEFAULT_LIMIT, MAX_LIMIT};
 use cosmwasm_std::{
     attr, entry_point, to_binary, Addr, Binary, Coin, Deps, DepsMut, Env, MessageInfo, Order,
-    Response, StdResult,
+    ReplyOn, Response, StdResult, SubMsg, WasmMsg,
 };
 use cw_storage_plus::Bound;
 use std::ops::Add;
-
-// contract info
-const CONTRACT_NAME: &str = "sudomod";
-const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
-
-// This tracks the reply from calling the vault contract instantiate submessage
-const MINT_VAULT_REPLY_ID: u64 = 1u64;
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
@@ -28,18 +22,21 @@ pub fn instantiate(
     // Store the contract name and version
     cw2::set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
 
-    // set the owner as info.sender
+    // Set owner as info.sender
     CONFIG.save(
         deps.storage,
         &Config {
             owner: info.sender,
-            last_vault_info_update: None,
+            vault_code_info_updated_at: None,
             vault_creation_fee: None,
         },
     )?;
 
-    // save the entry sequence to storage starting from 0
-    ENTRY_SEQ.save(deps.storage, &0u64)?;
+    // Set VAULT_CODE_SEQ to 0
+    VAULT_CODE_SEQ.save(deps.storage, &0u64)?;
+
+    // Set VAULT_INSTANTIATION_SEQ to 0
+    VAULT_INSTANTIATION_SEQ.save(deps.storage, &0u64)?;
 
     // return response
     Ok(Response::new().add_attribute("method", "instantiate"))
@@ -59,7 +56,7 @@ pub fn execute(
         ExecuteMsg::SetVaultCreationFee { amount } => {
             execute_set_vault_creation_fee(deps, &info, amount)
         }
-        ExecuteMsg::MintVault {} => execute_mint_vault(deps, env, &info),
+        ExecuteMsg::MintVault {} => execute_mint_vault(deps, &info),
         ExecuteMsg::WithdrawBalance { to_address, funds } => {
             execute_withdraw_balance(deps, env, &info, to_address, funds)
         }
@@ -80,15 +77,23 @@ pub fn execute_set_vault_code_id(
     // Checks if user can update vault code info
     helpers::can_update_vault_code_info(&deps, &env)?;
 
-    // in order to generate a new seq_id, we get the ENTRY_SEQ and increment it by 1
-    let id = ENTRY_SEQ.update::<_, cosmwasm_std::StdError>(deps.storage, |id| Ok(id.add(1)))?;
+    // Get a new seq_id for vault code update
+    let seq_id =
+        VAULT_CODE_SEQ.update::<_, cosmwasm_std::StdError>(deps.storage, |id| Ok(id.add(1)))?;
 
     // save the new entry to the vault code list
-    VAULT_CODE_LIST.save(deps.storage, id, &VaultCodeInfo { id, code_id })?;
+    VAULT_CODE_LIST.save(
+        deps.storage,
+        seq_id,
+        &VaultCodeInfo {
+            id: seq_id,
+            code_id,
+        },
+    )?;
 
-    // Update last_vault_info_update
+    // Update vault_code_info_updated_at
     CONFIG.update(deps.storage, |mut data| -> Result<_, ContractError> {
-        data.last_vault_info_update = Some(env.block.time);
+        data.vault_code_info_updated_at = Some(env.block.time);
         Ok(data)
     })?;
 
@@ -96,7 +101,7 @@ pub fn execute_set_vault_code_id(
     Ok(Response::new()
         .add_attribute("method", "set_vault_code_id")
         .add_attribute("code_id", code_id.to_string())
-        .add_attribute("seq_id", id.to_string()))
+        .add_attribute("seq_id", seq_id.to_string()))
 }
 
 pub fn execute_set_vault_creation_fee(
@@ -118,17 +123,49 @@ pub fn execute_set_vault_creation_fee(
         .add_attribute("amount", amount.to_string()))
 }
 
-pub fn execute_mint_vault(
-    deps: DepsMut,
-    env: Env,
-    info: &MessageInfo,
-) -> Result<Response, ContractError> {
-    // verify that caller sends the correct vault_creation_fee
-    // add submessage to create a new vault
-    // we do not want a reply but it should fail silently in the event
-    // of an error in the sub contract
+pub fn execute_mint_vault(deps: DepsMut, info: &MessageInfo) -> Result<Response, ContractError> {
+    // Verify that VAULT_CODE_SEQ for setting vault_code_id is greater than 0
+    // Which indicates there is a vault_code_id already set
+    let vault_code_seq_id = VAULT_CODE_SEQ.load(deps.storage)?;
+    if vault_code_seq_id.eq(&0u64) {
+        return Err(ContractError::VaultCodeIdNotSet {});
+    }
 
-    Ok(Response::new().add_attribute("method", "mint_vault"))
+    // Verify that caller sends the correct vault_creation_fee
+    // If no vault creation fee is set, it implies that this vault
+    // instance will be created for free.
+    helpers::validate_vault_creation_fee(&deps, &info.funds)?;
+
+    // Get a new vault_instance_seq_id
+    let vault_instance_seq_id = VAULT_INSTANTIATION_SEQ
+        .update::<_, cosmwasm_std::StdError>(deps.storage, |id| Ok(id.add(1)))?;
+
+    // Add submessage to create a new vault
+    let latest_code_info = VAULT_CODE_LIST.load(deps.storage, vault_code_seq_id)?;
+    let instantiate_vault_sub_msg = SubMsg {
+        gas_limit: None,
+        id: 0u64,
+        reply_on: ReplyOn::Never,
+        msg: WasmMsg::Instantiate {
+            admin: None,
+            code_id: latest_code_info.code_id,
+            msg: to_binary(&vault_contract::msg::InstantiateMsg {
+                owner_address: info.sender.to_string(),
+                from_code_id: latest_code_info.code_id,
+                index_number: vault_instance_seq_id,
+            })?,
+            funds: vec![],
+            label: format!("Vault Number {:?}", vault_instance_seq_id),
+        }
+        .into(),
+    };
+
+    // return response
+    Ok(Response::new()
+        .add_submessage(instantiate_vault_sub_msg)
+        .add_attribute("method", "mint_vault")
+        .add_attribute("vault_code_id", latest_code_info.code_id.to_string())
+        .add_attribute("vault_instance_seq_id", vault_instance_seq_id.to_string()))
 }
 
 pub fn execute_withdraw_balance(

@@ -14,6 +14,37 @@
         }
       },
       "additionalProperties": false
+    },
+    {
+      "description": "Returns VaultCodeListResponse",
+      "type": "object",
+      "required": [
+        "query_vault_code_list"
+      ],
+      "properties": {
+        "query_vault_code_list": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "start_after": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        }
+      },
+      "additionalProperties": false
     }
   ]
 }

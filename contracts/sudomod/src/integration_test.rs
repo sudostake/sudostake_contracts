@@ -2,18 +2,23 @@
 mod tests {
     use crate::{
         msg::{ExecuteMsg, InstantiateMsg, QueryMsg, VaultCodeListResponse},
+        state::MIN_VAULT_CODE_UPDATE_INTERVAL,
         state::{Config, VaultCodeInfo},
     };
-    use cosmwasm_std::{Addr, Coin, Empty, Uint128};
-    use cw_multi_test::{App, AppBuilder, Contract, ContractWrapper, Executor};
+    use cosmwasm_std::{testing::mock_env, Addr, Coin, Decimal, Empty, Uint128, Validator};
+    use cw_multi_test::{App, AppBuilder, Contract, ContractWrapper, Executor, StakingInfo};
 
     const USER: &str = "user";
     const STAKING_DENOM: &str = "udenom";
     const IBC_DENOM_1: &str = "ibc/usdc_denom";
     const SUPPLY: u128 = 500_000_000u128;
+    const VALIDATOR_ONE_ADDRESS: &str = "validator_one";
 
     fn mock_app() -> App {
-        AppBuilder::new().build(|router, _, storage| {
+        AppBuilder::new().build(|router, api, storage| {
+            let env = mock_env();
+
+            // Set the initial balances for USER
             router
                 .bank
                 .init_balance(
@@ -29,6 +34,35 @@ mod tests {
                             amount: Uint128::from(SUPPLY),
                         },
                     ],
+                )
+                .unwrap();
+
+            // Setup staking module for the correct mock data.
+            router
+                .staking
+                .setup(
+                    storage,
+                    StakingInfo {
+                        bonded_denom: STAKING_DENOM.to_string(),
+                        unbonding_time: 1, // in seconds
+                        apr: Decimal::percent(10),
+                    },
+                )
+                .unwrap();
+
+            // Add mock validator
+            router
+                .staking
+                .add_validator(
+                    api,
+                    storage,
+                    &env.block,
+                    Validator {
+                        address: VALIDATOR_ONE_ADDRESS.to_string(),
+                        commission: Decimal::zero(),
+                        max_commission: Decimal::one(),
+                        max_change_rate: Decimal::one(),
+                    },
                 )
                 .unwrap();
         })
@@ -71,43 +105,33 @@ mod tests {
     }
 
     fn instantiate_sudomod(app: &mut App) -> Addr {
-        let template_id = app.store_code(sudomod_contract_template());
-
+        let code_id = app.store_code(sudomod_contract_template());
         let msg = InstantiateMsg {};
 
-        let template_contract_addr = app
-            .instantiate_contract(
-                template_id,
-                Addr::unchecked(USER),
-                &msg,
-                &[],
-                "sudomod",
-                None,
-            )
+        let contract_addr = app
+            .instantiate_contract(code_id, Addr::unchecked(USER), &msg, &[], "sudomod", None)
             .unwrap();
 
         // return addr
-        template_contract_addr
+        contract_addr
     }
 
     fn setup_sudomod(app: &mut App) -> Addr {
-        // We need to create a sudomod instance with contract_address = contract1,
+        // Create an instance of sudomod with contract_address = contract1,
         // because this is what is hard coded as INSTANTIATOR_ADDR in the vault contract
         // For testing purposes.
-        //
-        // That is why we call instantiate_sudomod twice
         // ------------------------------------------------------------------------------
-        instantiate_sudomod(app); // contract0
-        let sudomod_c_addr = instantiate_sudomod(app); // contract1
+        instantiate_sudomod(app); // contract0 not used
+        let sudomod_c_addr = instantiate_sudomod(app);
 
-        // Return the sudomod contract_addr
+        // Return the contract_addr = contract1
         sudomod_c_addr
     }
 
     #[test]
     fn test_set_vault_code_id() {
         // Step 1
-        // Init
+        // Create an instance of sudomod
         // ------------------------------------------------------------------------------
         let mut app = mock_app();
         let sudomod_c_addr = setup_sudomod(&mut app);
@@ -155,13 +179,14 @@ mod tests {
         .unwrap_err();
 
         // Step 5
-        // Move the time forward such that MIN_VAULT_CODE_UPDATE_INTERVAL is exceeded
+        // Move time forward by MIN_VAULT_CODE_UPDATE_INTERVAL
         // -----------------------------------------------------------------------------
-        let min_update_interval: u64 = 60 * 60 * 24 * 30;
-        app.update_block(|block| block.time = block.time.plus_seconds(min_update_interval));
+        app.update_block(|block| {
+            block.time = block.time.plus_seconds(MIN_VAULT_CODE_UPDATE_INTERVAL)
+        });
 
         // Step 6
-        // Set vault code id properly
+        // Call ExecuteMsg::SetVaultCodeId
         // -----------------------------------------------------------------------------
         let code_id = app.store_code(vault_contract_template());
         let execute_msg = ExecuteMsg::SetVaultCodeId { code_id };
@@ -191,7 +216,7 @@ mod tests {
     #[test]
     fn test_set_vault_creation_fee() {
         // Step 1
-        // Init
+        // Create an instance of sudomod
         // ------------------------------------------------------------------------------
         let mut app = mock_app();
         let sudomod_c_addr = setup_sudomod(&mut app);
@@ -204,7 +229,6 @@ mod tests {
             amount: Uint128::new(10_000_000),
             denom: IBC_DENOM_1.to_string(),
         };
-
         let wrong_owner = "wrong_owner".to_string();
         let execute_msg = ExecuteMsg::SetVaultCreationFee {
             amount: vault_creation_fee.clone(),
@@ -218,7 +242,7 @@ mod tests {
         .unwrap_err();
 
         // Step 3
-        // Set vault creation fee  properly
+        // Set vault creation fee properly
         // -----------------------------------------------------------------------------
         app.execute_contract(
             Addr::unchecked(USER),
@@ -238,12 +262,168 @@ mod tests {
     #[test]
     fn test_mint_vault() {
         // Step 1
-        // Init
+        // Create an instance of sudomod
         // ------------------------------------------------------------------------------
         let mut app = mock_app();
-        let _sudomod_c_addr = setup_sudomod(&mut app);
+        let sudomod_c_addr = setup_sudomod(&mut app);
 
-        // todo
+        // Step 2
+        // Test error case ContractError::VaultCodeIdNotSet {}
+        // by trying to call MintVault before setting vault code id
+        // ------------------------------------------------------------------------------
+        let mint_vault_msg = ExecuteMsg::MintVault {};
+        app.execute_contract(
+            Addr::unchecked(USER),
+            sudomod_c_addr.clone(),
+            &mint_vault_msg,
+            &[],
+        )
+        .unwrap_err();
+
+        // Step 3
+        // set vault code id
+        // ------------------------------------------------------------------------------
+        let code_id = app.store_code(vault_contract_template());
+        let set_vault_code_id_msg = ExecuteMsg::SetVaultCodeId { code_id };
+        app.execute_contract(
+            Addr::unchecked(USER),
+            sudomod_c_addr.clone(),
+            &set_vault_code_id_msg,
+            &[],
+        )
+        .unwrap();
+
+        // Step 4
+        // Mint a free vault after setting vault code id
+        // ------------------------------------------------------------------------------
+        app.execute_contract(
+            Addr::unchecked(USER),
+            sudomod_c_addr.clone(),
+            &mint_vault_msg,
+            &[],
+        )
+        .unwrap();
+
+        // Step 5
+        // Set vault creation fee
+        // ------------------------------------------------------------------------------
+        let vault_creation_fee = Coin {
+            amount: Uint128::new(10_000_000),
+            denom: IBC_DENOM_1.to_string(),
+        };
+        app.execute_contract(
+            Addr::unchecked(USER),
+            sudomod_c_addr.clone(),
+            &ExecuteMsg::SetVaultCreationFee {
+                amount: vault_creation_fee.clone(),
+            },
+            &[],
+        )
+        .unwrap();
+
+        // Step 6
+        // Test error case ContractError::IncorrectTokenCreationFee {}
+        // by calling MintVault with an incorrect vault_creation_fee
+        // ------------------------------------------------------------------------------
+        app.execute_contract(
+            Addr::unchecked(USER),
+            sudomod_c_addr.clone(),
+            &mint_vault_msg,
+            &[],
+        )
+        .unwrap_err();
+
+        // Step 7
+        // Call MintVault with the correct vault_creation_fee
+        // ------------------------------------------------------------------------------
+        let res = app
+            .execute_contract(
+                Addr::unchecked(USER),
+                sudomod_c_addr.clone(),
+                &mint_vault_msg,
+                &[vault_creation_fee.clone()],
+            )
+            .unwrap();
+
+        // Step 8
+        // Get vault_contract_addr from res
+        // ------------------------------------------------------------------------------
+        let vault_contract_addr = res.events[3].attributes[0].value.clone();
+
+        // Add e2e test to verify that fees accrue at _sudomod_c_addr
+        // for accepted liquidity requests on vault_contract_addr
+        // ------------------------------------------------------------------------------
+        // ------------------------------------------------------------------------------
+        //
+        // Step 1
+        // Delegate to VALIDATOR_ONE_ADDRESS on vault_contract_addr
+        // ------------------------------------------------------------------------------
+        let delegate_amount = Uint128::new(1_000_000);
+        let delegate_msg = vault_contract::msg::ExecuteMsg::Delegate {
+            validator: VALIDATOR_ONE_ADDRESS.to_string(),
+            amount: delegate_amount,
+        };
+        app.execute_contract(
+            Addr::unchecked(USER),
+            Addr::unchecked(vault_contract_addr.clone()),
+            &delegate_msg,
+            &[Coin {
+                denom: STAKING_DENOM.into(),
+                amount: delegate_amount,
+            }],
+        )
+        .unwrap();
+
+        // Step 2
+        // Create a valid FixedTermLoan liquidity request on vault_contract_addr
+        // ------------------------------------------------------------------------------
+        let duration_in_seconds = 60u64;
+        let requested_amount = Uint128::new(100_000_000);
+        let expected_liquidity_comission = Uint128::new(300_000);
+        let option = vault_contract::state::LiquidityRequestMsg::FixedTermLoan {
+            requested_amount: Coin {
+                denom: IBC_DENOM_1.to_string(),
+                amount: requested_amount,
+            },
+            interest_amount: Uint128::zero(),
+            collateral_amount: delegate_amount,
+            duration_in_seconds,
+        };
+        app.execute_contract(
+            Addr::unchecked(USER),
+            Addr::unchecked(vault_contract_addr.clone()),
+            &vault_contract::msg::ExecuteMsg::RequestLiquidity {
+                option: option.clone(),
+            },
+            &[],
+        )
+        .unwrap();
+
+        // Step 3
+        // Accept the open liquidity request on vault_contract_addr
+        // ------------------------------------------------------------------------------
+        let accept_liquidity_request_msg =
+            vault_contract::msg::ExecuteMsg::AcceptLiquidityRequest {};
+        app.execute_contract(
+            Addr::unchecked(USER),
+            Addr::unchecked(vault_contract_addr),
+            &accept_liquidity_request_msg,
+            &[Coin {
+                denom: IBC_DENOM_1.to_string(),
+                amount: requested_amount,
+            }],
+        )
+        .unwrap();
+
+        // Step 4
+        // Verify that liquidity_comission from vault_contract_addr accrue at sudomod_c_addr
+        // ------------------------------------------------------------------------------
+        // ibc_denom_balance = SUPPLY - requested_amount +  vault_creation_fee
+        let balance = bank_balance(&mut app, &sudomod_c_addr, IBC_DENOM_1.to_string());
+        assert_eq!(
+            balance.amount,
+            vault_creation_fee.amount + expected_liquidity_comission
+        );
     }
 
     #[test]
@@ -302,14 +482,14 @@ mod tests {
         // Step 2
         // Send some tokens to sudomod_c_addr
         // ------------------------------------------------------------------------------
-        let amount = Uint128::new(1_000_000);
+        let contract_balance = Uint128::new(1_000_000);
         router
             .send_tokens(
                 Addr::unchecked(USER),
                 sudomod_c_addr.clone(),
                 &[Coin {
                     denom: STAKING_DENOM.to_string(),
-                    amount,
+                    amount: contract_balance,
                 }],
             )
             .unwrap();
@@ -322,7 +502,7 @@ mod tests {
             to_address: None,
             funds: Coin {
                 denom: STAKING_DENOM.to_string(),
-                amount: amount,
+                amount: contract_balance,
             },
         };
         router
@@ -342,7 +522,7 @@ mod tests {
             to_address: None,
             funds: Coin {
                 denom: STAKING_DENOM.to_string(),
-                amount: amount + amount,
+                amount: contract_balance + Uint128::new(1),
             },
         };
         router

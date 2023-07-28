@@ -3,10 +3,18 @@
   "title": "InstantiateMsg",
   "type": "object",
   "required": [
+    "from_code_id",
     "owner_address"
   ],
   "properties": {
+    "from_code_id": {
+      "description": "from_code_id allows us to easily tell the code_id this vault was instantiated from. This is useful when we want to check if the vault is outdated by comparing from_code_id to the latest vault_code_id on sudomod contract",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
     "owner_address": {
+      "description": "Assigned as the owner of the vault instance",
       "type": "string"
     }
   }

@@ -6,31 +6,31 @@ use cosmwasm_std::{Addr, DepsMut};
 
 // True  = vault has an open liquidity request
 // False = vault does not have an open liquidity request
-type WithOpenLiquidityRequest = bool;
+type WithRequestLiquidity = bool;
 
 #[derive(PartialEq)]
 pub enum ActionTypes {
-    Delegate(WithOpenLiquidityRequest),
+    Delegate,
     Redelegate,
-    Undelegate(WithOpenLiquidityRequest),
-    OpenLiquidityRequest(WithOpenLiquidityRequest),
-    CloseLiquidityRequest(WithOpenLiquidityRequest),
-    WithdrawBalance,
-    TransferOwnership,
+    Undelegate(WithRequestLiquidity),
+    RequestLiquidity(WithRequestLiquidity),
+    ClosePendingLiquidityRequest(WithRequestLiquidity),
     AcceptLiquidityRequest,
     ClaimDelegatorRewards,
-    LiquidateCollateral(WithOpenLiquidityRequest),
-    RepayLoan(WithOpenLiquidityRequest),
+    LiquidateCollateral(WithRequestLiquidity),
+    RepayLoan(WithRequestLiquidity),
+    WithdrawBalance,
+    TransferOwnership,
     Vote,
 }
 
-// Applies to the owner of the vault
+// Applies to owner of vault
 const OWNER_AUTHORIZATIONS: [ActionTypes; 11] = [
-    ActionTypes::Delegate(false),
+    ActionTypes::Delegate,
     ActionTypes::Redelegate,
     ActionTypes::Undelegate(false),
-    ActionTypes::OpenLiquidityRequest(false),
-    ActionTypes::CloseLiquidityRequest(true),
+    ActionTypes::RequestLiquidity(false),
+    ActionTypes::ClosePendingLiquidityRequest(true),
     ActionTypes::TransferOwnership,
     ActionTypes::RepayLoan(true),
     ActionTypes::ClaimDelegatorRewards,

@@ -1,8 +1,7 @@
+use crate::state::VaultCodeInfo;
 use cosmwasm_std::Coin;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-
-use crate::state::VaultCodeInfo;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InstantiateMsg {}
@@ -14,20 +13,23 @@ pub enum ExecuteMsg {
     /// when creating new instances of vaults
     SetVaultCodeId { code_id: u64 },
 
-    /// Allows owner_address to set the vault creation fee
+    /// Allows owner_address to set an amount to be paid by info.sender
+    /// when calling MintVault.
     SetVaultCreationFee { amount: Coin },
 
-    /// Creates a new vault by calling the instantiate method of the VAULT_CONTRACT,
-    /// which returns a contract address of the new vault.
+    /// Ensures that all instances of vaults created from code_id
+    /// is paid for, as only the instance of sudomod contract set as INSTANTIATOR_ADDR in the
+    /// vault contract's source code can call the instantiate method of the VAULT_CONTRACT
     MintVault {},
 
-    /// Allows  owner_address to withdraw funds.
+    /// Allows owner_address to withdraw funds from the contract account.
     WithdrawBalance {
         to_address: Option<String>,
         funds: Coin,
     },
 
-    /// Allows a vault owner to transfer ownership to another user.
+    /// Allows owner_address to transfer ownership to another owner's address
+    /// Note: To burn this contract account, set to_address = env.contract.address
     TransferOwnership { to_address: String },
 }
 

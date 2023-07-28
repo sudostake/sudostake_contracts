@@ -1,4 +1,4 @@
-use cosmwasm_std::{StdError, Coin};
+use cosmwasm_std::{Coin, StdError};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -14,6 +14,12 @@ pub enum ContractError {
 
     #[error("Minimum vault code update interval not reached")]
     MinVaultCodeUpdateIntervalNotReached {},
+
+    #[error("Incorrect amount sent as token_creation_fee:  required: {required:?}, received: {received:?}")]
+    IncorrectTokenCreationFee { required: Coin, received: Coin },
+
+    #[error("Please call SetVaultCodeId first")]
+    VaultCodeIdNotSet {},
 
     #[error("Custom Error val: {val:?}")]
     CustomError { val: String },

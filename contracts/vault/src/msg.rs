@@ -1,42 +1,21 @@
-use cosmwasm_std::{Coin, Uint128, VoteOption};
+use crate::state::{ActiveOption, Config, LiquidityRequestMsg};
+use cosmwasm_std::{Coin, Delegation, Uint128, VoteOption};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::state::{ActiveOption, Config};
-
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InstantiateMsg {
-    /// assigned as the owner of the vault instance
+    /// Assigned as the owner of the vault instance
     pub owner_address: String,
 
     /// from_code_id allows us to easily tell the code_id this vault
     /// was instantiated from.
-    /// This is especially useful when we want to check if the vault is outdated
-    /// by comparing from_code_id to the vault_code_id on sudomod
+    /// This is useful when we want to check if the vault is outdated
+    /// by comparing from_code_id to the latest vault_code_id on sudomod contract
     pub from_code_id: u64,
-}
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum LiquidityRequestOptionMsg {
-    FixedTermRental {
-        requested_amount: Coin,
-        duration_in_seconds: u64,
-        can_cast_vote: bool,
-    },
-    FixedInterestRental {
-        requested_amount: Coin,
-        claimable_tokens: Uint128,
-        can_cast_vote: bool,
-    },
-    FixedTermLoan {
-        requested_amount: Coin,
-        /// Implicitly denominated in requested_amount.denom
-        interest_amount: Uint128,
-        /// Implicitly denominated in bonded_denom
-        collateral_amount: Uint128,
-        duration_in_seconds: u64,
-    },
+    // This is the index number of the current vault
+    pub index_number: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -62,18 +41,18 @@ pub enum ExecuteMsg {
     },
 
     /// Allows the vault owner to open a liquidity request option
-    OpenLiquidityRequest {
-        option: LiquidityRequestOptionMsg,
+    RequestLiquidity {
+        option: LiquidityRequestMsg,
     },
 
-    /// Allows the vault owner to close a liquidity request option
+    /// Allows the vault owner to close a liquidity request
     /// before the offer is accepted by lenders.
-    CloseLiquidityRequest {},
+    ClosePendingLiquidityRequest {},
 
     /// Allows a lender to accept the pending liquidity request.
     AcceptLiquidityRequest {},
 
-    // Allows the vault owner(s) to claim delegator rewards
+    // Allows the vault owner/lender to claim delegator rewards
     ClaimDelegatorRewards {},
 
     /// Allows the vault owner to repay the amount borrowed from the lender
@@ -81,26 +60,28 @@ pub enum ExecuteMsg {
     RepayLoan {},
 
     /// Allows the vault owner/lender to liquidate collateral
-    /// by unstaking the specified amount owed to the lender.
+    /// which may include unstaking the outstanding amount owed to the lender.
+    /// after all free balance is spent.
     LiquidateCollateral {},
-
-    /// Allows the vault owner/lender to withdraw funds from the vault.
-    /// While liquidation is processing, the lender's withdrawal
-    /// is prioritized over the vault's owner.
-    WithdrawBalance {
-        to_address: Option<String>,
-        funds: Coin,
-    },
-
-    /// Allows a vault owner to transfer ownership to another user.
-    TransferOwnership {
-        to_address: String,
-    },
 
     /// Allows vault owner/lender to cast a simple vote
     Vote {
         proposal_id: u64,
         vote: VoteOption,
+    },
+
+    /// Allows owner_address to transfer ownership to another owner's address
+    /// Note: To burn this contract account, set to_address = env.contract.address
+    TransferOwnership {
+        to_address: String,
+    },
+
+    /// Allows the vault owner to withdraw funds from the vault.
+    /// While liquidation is processing, the lender's withdrawal
+    /// is prioritized over the vault's owner.
+    WithdrawBalance {
+        to_address: Option<String>,
+        funds: Coin,
     },
 }
 
@@ -109,10 +90,27 @@ pub enum ExecuteMsg {
 pub enum QueryMsg {
     /// Returns InfoResponse
     Info {},
+
+    /// Returns StakingInfoResponse
+    StakingInfo {},
+
+    /// Returns an array of all active delegations made from this vault
+    AllDelegations {},
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InfoResponse {
     pub config: Config,
     pub liquidity_request: Option<ActiveOption>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct StakingInfoResponse {
+    pub total_staked: Uint128,
+    pub accumulated_rewards: Uint128,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct AllDelegationsResponse {
+    pub data: Vec<Delegation>,
 }

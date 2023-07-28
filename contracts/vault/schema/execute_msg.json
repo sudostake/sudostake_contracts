@@ -85,17 +85,17 @@
       "description": "Allows the vault owner to open a liquidity request option",
       "type": "object",
       "required": [
-        "open_liquidity_request"
+        "request_liquidity"
       ],
       "properties": {
-        "open_liquidity_request": {
+        "request_liquidity": {
           "type": "object",
           "required": [
             "option"
           ],
           "properties": {
             "option": {
-              "$ref": "#/definitions/LiquidityRequestOptionMsg"
+              "$ref": "#/definitions/LiquidityRequestMsg"
             }
           }
         }
@@ -103,13 +103,13 @@
       "additionalProperties": false
     },
     {
-      "description": "Allows the vault owner to close a liquidity request option before the offer is accepted by lenders.",
+      "description": "Allows the vault owner to close a liquidity request before the offer is accepted by lenders.",
       "type": "object",
       "required": [
-        "close_liquidity_request"
+        "close_pending_liquidity_request"
       ],
       "properties": {
-        "close_liquidity_request": {
+        "close_pending_liquidity_request": {
           "type": "object"
         }
       },
@@ -154,7 +154,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Allows the vault owner/lender to liquidate collateral by unstaking the specified amount owed to the lender.",
+      "description": "Allows the vault owner/lender to liquidate collateral which may include unstaking the outstanding amount owed to the lender. after all free balance is spent.",
       "type": "object",
       "required": [
         "liquidate_collateral"
@@ -162,54 +162,6 @@
       "properties": {
         "liquidate_collateral": {
           "type": "object"
-        }
-      },
-      "additionalProperties": false
-    },
-    {
-      "description": "Allows the vault owner/lender to withdraw funds from the vault. While liquidation is processing, the lender's withdrawal is prioritized over the vault's owner.",
-      "type": "object",
-      "required": [
-        "withdraw_balance"
-      ],
-      "properties": {
-        "withdraw_balance": {
-          "type": "object",
-          "required": [
-            "funds"
-          ],
-          "properties": {
-            "funds": {
-              "$ref": "#/definitions/Coin"
-            },
-            "to_address": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    {
-      "description": "Allows a vault owner to transfer ownership to another user.",
-      "type": "object",
-      "required": [
-        "transfer_ownership"
-      ],
-      "properties": {
-        "transfer_ownership": {
-          "type": "object",
-          "required": [
-            "to_address"
-          ],
-          "properties": {
-            "to_address": {
-              "type": "string"
-            }
-          }
         }
       },
       "additionalProperties": false
@@ -240,6 +192,54 @@
         }
       },
       "additionalProperties": false
+    },
+    {
+      "description": "Allows a vault owner to transfer ownership to another user.",
+      "type": "object",
+      "required": [
+        "transfer_ownership"
+      ],
+      "properties": {
+        "transfer_ownership": {
+          "type": "object",
+          "required": [
+            "to_address"
+          ],
+          "properties": {
+            "to_address": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Allows the vault owner to withdraw funds from the vault. While liquidation is processing, the lender's withdrawal is prioritized over the vault's owner.",
+      "type": "object",
+      "required": [
+        "withdraw_balance"
+      ],
+      "properties": {
+        "withdraw_balance": {
+          "type": "object",
+          "required": [
+            "funds"
+          ],
+          "properties": {
+            "funds": {
+              "$ref": "#/definitions/Coin"
+            },
+            "to_address": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
     }
   ],
   "definitions": {
@@ -258,7 +258,7 @@
         }
       }
     },
-    "LiquidityRequestOptionMsg": {
+    "LiquidityRequestMsg": {
       "oneOf": [
         {
           "type": "object",

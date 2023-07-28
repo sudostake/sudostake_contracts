@@ -15,8 +15,11 @@ pub enum ContractError {
         received: Uint128,
     },
 
-    #[error("ValidatorIsInactive")]
+    #[error("ValidatorIsInactive: {validator:?}")]
     ValidatorIsInactive { validator: String },
+
+    #[error("LiquidityRequestIsActive")]
+    LiquidityRequestIsActive {},
 
     #[error("InvalidLiquidityRequestOption")]
     InvalidLiquidityRequestOption {},
@@ -30,10 +33,8 @@ pub enum ContractError {
     #[error("InsufficientBalance: Required {required:?}, Available {available:?}")]
     InsufficientBalance { required: Coin, available: Coin },
 
-    #[error("Please repay: {amount:?}, owed to the lender for the defaulted fixed term loan first!")]
-    PleaseClearYourDebtFirst {
-        amount: Coin,
-    },
+    #[error("Repay: {amount:?}, owed to the lender for the defaulted fixed term loan")]
+    ClearOutstandingDebt { amount: Coin },
 
     #[error("Custom Error val: {val:?}")]
     CustomError { val: String },

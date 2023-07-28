@@ -1,19 +1,47 @@
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-
 use cosmwasm_std::{Addr, Coin, Timestamp, Uint128};
 use cw_storage_plus::Item;
-
-use crate::msg::LiquidityRequestOptionMsg;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
     pub owner: Addr,
     pub from_code_id: u64,
+    pub index_number: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub enum LiquidityRequestOptionState {
+pub struct ActiveOption {
+    pub lender: Option<Addr>,
+    pub msg: LiquidityRequestMsg,
+    pub state: Option<LiquidityRequestState>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LiquidityRequestMsg {
+    FixedTermRental {
+        requested_amount: Coin,
+        duration_in_seconds: u64,
+        can_cast_vote: bool,
+    },
+    FixedInterestRental {
+        requested_amount: Coin,
+        claimable_tokens: Uint128,
+        can_cast_vote: bool,
+    },
+    FixedTermLoan {
+        requested_amount: Coin,
+        /// Implicitly denominated in requested_amount.denom
+        interest_amount: Uint128,
+        /// Implicitly denominated in bonded_denom
+        collateral_amount: Uint128,
+        duration_in_seconds: u64,
+    },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub enum LiquidityRequestState {
     FixedTermRental {
         requested_amount: Coin,
         start_time: Timestamp,
@@ -39,12 +67,15 @@ pub enum LiquidityRequestOptionState {
     },
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct ActiveOption {
-    pub lender: Option<Addr>,
-    pub state: Option<LiquidityRequestOptionState>,
-    pub msg: LiquidityRequestOptionMsg,
-}
+// contract info
+pub const CONTRACT_NAME: &str = "vault_contract";
+pub const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+// Only INSTANTIATOR_ADDR can call the InstantiateMsg
+pub const INSTANTIATOR_ADDR: &str = "contract1";
+
+// Minimum duration between calls to unbond collateral during liquidation
+pub const STAKE_LIQUIDATION_INTERVAL: u64 = 60 * 60 * 24 * 30;
 
 // This stores the config variables during initialization of the contract
 pub const CONFIG: Item<Config> = Item::new("CONFIG");
