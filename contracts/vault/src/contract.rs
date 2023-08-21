@@ -373,6 +373,7 @@ pub fn execute_accept_liquidity_request(
     info: &MessageInfo,
 ) -> Result<Response, ContractError> {
     let mut response = Response::new();
+    let config = CONFIG.load(deps.storage)?;
     let (state, requested_amount) = helpers::map_liquidity_request_state(&deps, &env)?;
 
     // Verify that the lender is sending the correct requested amount
@@ -420,9 +421,11 @@ pub fn execute_accept_liquidity_request(
     );
 
     // respond
-    Ok(response
-        .add_message(transfer_msg)
-        .add_attributes(vec![attr("method", "accept_liquidity_request")]))
+    Ok(response.add_message(transfer_msg).add_attributes(vec![
+        attr("method", "accept_liquidity_request"),
+        attr("amount", requested_amount.amount.to_string()),
+        attr("vault_owner", config.owner.to_string()),
+    ]))
 }
 
 pub fn execute_claim_delegator_rewards(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
