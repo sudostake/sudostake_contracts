@@ -75,10 +75,10 @@ $ archwayd keys list
 
 &nbsp;
 
-### Export variables for use in terminal (zsh)
+### Export variables for use in terminal - Constantine-3
 
 ```zsh
-# export path to yout go installation
+# Export path to your go installation
 $ source ~/.profile
 
 $ export CHAIN_ID="constantine-3"
@@ -88,6 +88,23 @@ $ export RPC="https://rpc.constantine.archway.tech:443"
 $ export NODE=(--node $RPC)
 
 $ export TXFLAG=($NODE --chain-id $CHAIN_ID --gas-prices 20000000000000aconst --gas auto --gas-adjustment 1.3)
+```
+
+&nbsp;
+
+### Export variables for use in terminal - Triomphe
+
+```zsh
+# export path to your go installation
+$ source ~/.profile
+
+$ export CHAIN_ID="archway-1"
+
+$ export RPC="https://rpc.mainnet.archway.io:443"
+
+$ export NODE=(--node $RPC)
+
+$ export TXFLAG=($NODE --chain-id $CHAIN_ID --gas-prices 900000000000aarch --gas auto --gas-adjustment 1.3)
 ```
 
 &nbsp;
