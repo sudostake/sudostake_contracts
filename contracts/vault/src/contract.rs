@@ -216,8 +216,11 @@ pub fn execute_redelegate(
         state: Some(state),
     }) = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?
     {
-        let (accumulated_rewards, distribute_msgs) =
-            helpers::accumulated_rewards(&deps, &env, Some(vec![src_validator.clone()]))?;
+        let (accumulated_rewards, distribute_msgs) = helpers::accumulated_rewards(
+            &deps,
+            &env,
+            Some(vec![src_validator.clone(), dst_validator.clone()]),
+        )?;
 
         if !accumulated_rewards.is_zero() {
             response = response.add_messages(distribute_msgs);

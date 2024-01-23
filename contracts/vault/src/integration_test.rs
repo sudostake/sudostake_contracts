@@ -688,18 +688,34 @@ mod tests {
         let (vault_c_addr, _from_code_id) = instantiate_vault(&mut router);
 
         // Step 2
-        // delegate some tokens to VALIDATOR_ONE_ADDRESS
+        // delegate some tokens to VALIDATOR_ONE_ADDRESS and VALIDATOR_TWO_ADDRESS
         // ------------------------------------------------------------------------------
         let amount = Uint128::new(1_000_000);
-        let delegate_msg = ExecuteMsg::Delegate {
+        let delegate_msg_val_1 = ExecuteMsg::Delegate {
             validator: VALIDATOR_ONE_ADDRESS.to_string(),
+            amount,
+        };
+        let delegate_msg_val_2 = ExecuteMsg::Delegate {
+            validator: VALIDATOR_TWO_ADDRESS.to_string(),
             amount,
         };
         router
             .execute_contract(
                 Addr::unchecked(USER),
                 vault_c_addr.clone(),
-                &delegate_msg,
+                &delegate_msg_val_1,
+                &[Coin {
+                    denom: STAKING_DENOM.into(),
+                    amount,
+                }],
+            )
+            .unwrap();
+
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &delegate_msg_val_2,
                 &[Coin {
                     denom: STAKING_DENOM.into(),
                     amount,
@@ -770,7 +786,7 @@ mod tests {
 
         // Step 7
         // Ensure that the claimed accumulated staking rewards from VALIDATOR_ONE_ADDRESS
-        // went to the lender
+        // and VALIDATOR_TWO_ADDRESS went to the lender
         // ------------------------------------------------------------------------------
         let lender_balance =
             bank_balance(&mut router, &Addr::unchecked(USER), STAKING_DENOM.into());
@@ -778,12 +794,14 @@ mod tests {
             lender_balance,
             Coin {
                 denom: STAKING_DENOM.to_string(),
-                amount: Uint128::new(SUPPLY) - (amount) + expected_claimed_rewards
+                amount: Uint128::new(SUPPLY) - (amount + amount)
+                    + expected_claimed_rewards
+                    + expected_claimed_rewards
             }
         );
 
         // Step 8
-        // verify that VALIDATOR_TWO_ADDRESS now has the delegations of user
+        // verify that VALIDATOR_TWO_ADDRESS now has all the delegations of user
         // ------------------------------------------------------------------------------
         let delegation = router
             .wrap()
@@ -795,7 +813,7 @@ mod tests {
             delegation.amount,
             Coin {
                 denom: STAKING_DENOM.to_string(),
-                amount
+                amount: amount + amount
             }
         );
     }
