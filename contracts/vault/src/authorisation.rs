@@ -40,7 +40,8 @@ const OWNER_AUTHORIZATIONS: [ActionTypes; 11] = [
 ];
 
 // Applies to the active lenders on the vault
-const LENDER_AUTHORIZATIONS: [ActionTypes; 3] = [
+const LENDER_AUTHORIZATIONS: [ActionTypes; 4] = [
+    ActionTypes::Redelegate,
     ActionTypes::ClaimDelegatorRewards,
     ActionTypes::LiquidateCollateral(true),
     ActionTypes::Vote,

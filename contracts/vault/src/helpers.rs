@@ -17,6 +17,16 @@ pub fn ensure_validator_is_active(deps: &DepsMut, validator: &str) -> Result<(),
     Ok(())
 }
 
+pub fn ensure_lender_can_redelegate(deps: &DepsMut, src_validator: &str) -> Result<(), ContractError> {
+    if deps.querier.query_validator(src_validator)?.is_some() {
+        return Err(ContractError::LenderCannotRedelegateFromActiveValidator {
+            validator: src_validator.to_string(),
+        });
+    }
+
+    Ok(())
+}
+
 fn get_amount_for_denom(funds: &[Coin], denom_str: String) -> StdResult<Uint128> {
     Ok(funds
         .iter()

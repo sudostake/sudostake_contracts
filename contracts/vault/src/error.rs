@@ -18,6 +18,9 @@ pub enum ContractError {
     #[error("ValidatorIsInactive: {validator:?}")]
     ValidatorIsInactive { validator: String },
 
+    #[error("LenderCannotRedelegateFromActiveValidator: {validator:?}")]
+    LenderCannotRedelegateFromActiveValidator { validator: String },
+
     #[error("LiquidityRequestIsActive")]
     LiquidityRequestIsActive {},
 

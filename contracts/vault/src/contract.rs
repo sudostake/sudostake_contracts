@@ -197,17 +197,22 @@ pub fn execute_delegate(
 pub fn execute_redelegate(
     deps: DepsMut,
     env: Env,
-    _info: &MessageInfo,
+    info: &MessageInfo,
     src_validator: String,
     dst_validator: String,
     amount: Uint128,
 ) -> Result<Response, ContractError> {
-    // Init response object
     let mut response = Response::new();
+    let denom_str = deps.querier.query_bonded_denom()?;
+    let config = CONFIG.load(deps.storage)?;
 
     // Ensure that the dst_validator is in the active set
-    let denom_str = deps.querier.query_bonded_denom()?;
     helpers::ensure_validator_is_active(&deps, dst_validator.as_str())?;
+
+    // Allow the active lender to re-delegate away from inactive src_validator
+    if info.sender.clone().ne(&config.owner) {
+        helpers::ensure_lender_can_redelegate(&deps, src_validator.as_str())?;
+    }
 
     // Process lender claims on claimed accumulated staking rewards from src_validator
     if let Some(ActiveOption {

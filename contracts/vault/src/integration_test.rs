@@ -15,6 +15,7 @@ mod tests {
     use cw_multi_test::{App, AppBuilder, Contract, ContractWrapper, Executor, StakingInfo};
 
     const USER: &str = "user";
+    const LENDER: &str = "lender";
     const STAKING_DENOM: &str = "TOKEN";
     const IBC_DENOM_1: &str = "ibc/usdc_denom";
     const SUPPLY: u128 = 500_000_000u128;
@@ -35,6 +36,25 @@ mod tests {
                         Coin {
                             denom: STAKING_DENOM.to_string(),
                             amount: Uint128::from(SUPPLY),
+                        },
+                        Coin {
+                            denom: IBC_DENOM_1.to_string(),
+                            amount: Uint128::from(SUPPLY),
+                        },
+                    ],
+                )
+                .unwrap();
+
+            // Set the initial balances for LENDER
+            router
+                .bank
+                .init_balance(
+                    storage,
+                    &Addr::unchecked(LENDER),
+                    vec![
+                        Coin {
+                            denom: STAKING_DENOM.to_string(),
+                            amount: Uint128::zero(),
                         },
                         Coin {
                             denom: IBC_DENOM_1.to_string(),
@@ -691,19 +711,14 @@ mod tests {
         // delegate some tokens to VALIDATOR_ONE_ADDRESS and VALIDATOR_TWO_ADDRESS
         // ------------------------------------------------------------------------------
         let amount = Uint128::new(1_000_000);
-        let delegate_msg_val_1 = ExecuteMsg::Delegate {
-            validator: VALIDATOR_ONE_ADDRESS.to_string(),
-            amount,
-        };
-        let delegate_msg_val_2 = ExecuteMsg::Delegate {
-            validator: VALIDATOR_TWO_ADDRESS.to_string(),
-            amount,
-        };
         router
             .execute_contract(
                 Addr::unchecked(USER),
                 vault_c_addr.clone(),
-                &delegate_msg_val_1,
+                &ExecuteMsg::Delegate {
+                    validator: VALIDATOR_ONE_ADDRESS.to_string(),
+                    amount,
+                },
                 &[Coin {
                     denom: STAKING_DENOM.into(),
                     amount,
@@ -715,7 +730,10 @@ mod tests {
             .execute_contract(
                 Addr::unchecked(USER),
                 vault_c_addr.clone(),
-                &delegate_msg_val_2,
+                &ExecuteMsg::Delegate {
+                    validator: VALIDATOR_TWO_ADDRESS.to_string(),
+                    amount,
+                },
                 &[Coin {
                     denom: STAKING_DENOM.into(),
                     amount,
@@ -724,7 +742,7 @@ mod tests {
             .unwrap();
 
         // Step 3
-        // Open FixedTermRental liquidity request
+        // Open a rental option on the vault
         // ------------------------------------------------------------------------------
         let one_year_duration = 60 * 60 * 24 * 365;
         router
@@ -737,7 +755,7 @@ mod tests {
                             denom: IBC_DENOM_1.to_string(),
                             amount,
                         },
-                        duration_in_seconds: one_year_duration,
+                        duration_in_seconds: one_year_duration + one_year_duration,
                         can_cast_vote: false,
                     },
                 },
@@ -746,12 +764,12 @@ mod tests {
             .unwrap();
 
         // Step 4
-        // Accept FixedTermRental
+        // Accept liquidity request option by LENDER
         // ------------------------------------------------------------------------------
         let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest {};
         router
             .execute_contract(
-                Addr::unchecked(USER),
+                Addr::unchecked(LENDER),
                 vault_c_addr.clone(),
                 &accept_liquidity_request_msg,
                 &[Coin {
@@ -762,19 +780,31 @@ mod tests {
             .unwrap();
 
         // Step 5
-        // Move the chain foward to accumulate rewards
-        // ------------------------------------------------------------------------------
-        let expected_claimed_rewards = Uint128::new(100_000);
-        router.update_block(|block| block.time = block.time.plus_seconds(one_year_duration));
-
-        // Step 6
-        // Redelegate tokens to VALIDATOR_TWO_ADDRESS
-        // ------------------------------------------------------------------------------
+        // Test error case ContractError::LenderCannotRedelegateFromActiveValidator {}
+        // when we try to redelegate from an active validator by LENDER
         let redelegate_msg = ExecuteMsg::Redelegate {
             src_validator: VALIDATOR_ONE_ADDRESS.to_string(),
             dst_validator: VALIDATOR_TWO_ADDRESS.to_string(),
             amount,
         };
+        router
+            .execute_contract(
+                Addr::unchecked(LENDER),
+                vault_c_addr.clone(),
+                &redelegate_msg,
+                &[],
+            )
+            .unwrap_err();
+
+        // Step 6
+        // Move the chain foward to accumulate rewards
+        // ------------------------------------------------------------------------------
+        let expected_claimed_rewards = Uint128::new(100_000);
+        router.update_block(|block| block.time = block.time.plus_seconds(one_year_duration));
+
+        // Step 7
+        // Redelegate tokens to VALIDATOR_TWO_ADDRESS as vault owner
+        // ------------------------------------------------------------------------------
         router
             .execute_contract(
                 Addr::unchecked(USER),
@@ -784,23 +814,21 @@ mod tests {
             )
             .unwrap();
 
-        // Step 7
+        // Step 8
         // Ensure that the claimed accumulated staking rewards from VALIDATOR_ONE_ADDRESS
-        // and VALIDATOR_TWO_ADDRESS went to the lender
+        // and VALIDATOR_TWO_ADDRESS went to LENDER
         // ------------------------------------------------------------------------------
         let lender_balance =
-            bank_balance(&mut router, &Addr::unchecked(USER), STAKING_DENOM.into());
+            bank_balance(&mut router, &Addr::unchecked(LENDER), STAKING_DENOM.into());
         assert_eq!(
             lender_balance,
             Coin {
                 denom: STAKING_DENOM.to_string(),
-                amount: Uint128::new(SUPPLY) - (amount + amount)
-                    + expected_claimed_rewards
-                    + expected_claimed_rewards
+                amount: expected_claimed_rewards + expected_claimed_rewards
             }
         );
 
-        // Step 8
+        // Step 9
         // verify that VALIDATOR_TWO_ADDRESS now has all the delegations of user
         // ------------------------------------------------------------------------------
         let delegation = router
