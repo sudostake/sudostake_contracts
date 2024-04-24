@@ -8,12 +8,10 @@ Non-Custodial | Smart Contract Staking | Peer-to-Peer Options Trading Platform.
 
 &nbsp;
 
-| Contracts (tag: v0.1.0)                                                        | Description                                                        |
+| Contracts                                                                      | Description                                                        |
 | :----------------------------------------------------------------------------- | :----------------------------------------------------------------- |
-| [SudoMod](contracts/sudomod)                                                   | Creates and manages vaults and lp_groups                           |
-| [LP-Group](contracts/lp_group)                                                 | Manages a group of liquidity providers                             |
-| [Token-Swap](contracts/token-swap)                                             | Allows swapping between tokens                                     |
-| [Vault](contracts/vault)                                                       | Allows users to manage staked tokens and request liquidity         |
+| [SudoMod](contracts/sudomod)                                                   | Proxy for minting vaults                                           |
+| [Vault](contracts/vault)                                                       | Staking with peer-to-peer options trading                          |
 
 &nbsp;
 
