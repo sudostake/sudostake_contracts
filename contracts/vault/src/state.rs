@@ -72,7 +72,7 @@ pub const CONTRACT_NAME: &str = "vault_contract";
 pub const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 // Only INSTANTIATOR_ADDR can call the InstantiateMsg
-pub const INSTANTIATOR_ADDR: &str = "contract1";
+pub const INSTANTIATOR_ADDR: &str = "archway1wyq63wtaktujyp7zrd58ytzc76g9vtamlgwrq9qhhf0j32usvfesn9s38g";
 
 // Minimum duration between calls to unbond collateral during liquidation
 pub const STAKE_LIQUIDATION_INTERVAL: u64 = 60 * 60 * 24 * 30;
