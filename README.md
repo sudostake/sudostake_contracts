@@ -39,7 +39,7 @@ $ docker run --rm -v "$(pwd)":/code \
 
 ## Working with smart contracts (archwayd)
 
-(See [instructions](https://docs.archway.io/developers) on how install `archwayd`)
+(See [instructions](https://docs.archway.io/developers) on how to install `archwayd`)
 
 &nbsp;
 
