@@ -50,7 +50,9 @@ pub enum ExecuteMsg {
     ClosePendingLiquidityRequest {},
 
     /// Allows a lender to accept the pending liquidity request.
-    AcceptLiquidityRequest {},
+    AcceptLiquidityRequest {
+        option: LiquidityRequestMsg,
+    },
 
     // Allows the vault owner/lender to claim delegator rewards
     ClaimDelegatorRewards {},

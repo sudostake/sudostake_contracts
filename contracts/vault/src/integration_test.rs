@@ -380,7 +380,7 @@ mod tests {
         // Step 6
         // Accept FixedTermLoan
         // ------------------------------------------------------------------------------
-        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest {};
+        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest { option };
         router
             .execute_contract(
                 Addr::unchecked(USER),
@@ -515,19 +515,21 @@ mod tests {
         // Open FixedTermRental liquidity request
         // ------------------------------------------------------------------------------
         let one_year_duration = 60 * 60 * 24 * 365;
+        let option = LiquidityRequestMsg::FixedTermRental {
+            requested_amount: Coin {
+                denom: IBC_DENOM_1.to_string(),
+                amount,
+            },
+            duration_in_seconds: one_year_duration,
+            can_cast_vote: false,
+        };
+
         router
             .execute_contract(
                 Addr::unchecked(USER),
                 vault_c_addr.clone(),
                 &ExecuteMsg::RequestLiquidity {
-                    option: LiquidityRequestMsg::FixedTermRental {
-                        requested_amount: Coin {
-                            denom: IBC_DENOM_1.to_string(),
-                            amount,
-                        },
-                        duration_in_seconds: one_year_duration,
-                        can_cast_vote: false,
-                    },
+                    option: option.clone(),
                 },
                 &[],
             )
@@ -536,7 +538,7 @@ mod tests {
         // Step 5
         // Accept FixedTermRental
         // ------------------------------------------------------------------------------
-        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest {};
+        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest { option };
         router
             .execute_contract(
                 Addr::unchecked(USER),
@@ -745,19 +747,21 @@ mod tests {
         // Open a rental option on the vault
         // ------------------------------------------------------------------------------
         let one_year_duration = 60 * 60 * 24 * 365;
+        let option = LiquidityRequestMsg::FixedTermRental {
+            requested_amount: Coin {
+                denom: IBC_DENOM_1.to_string(),
+                amount,
+            },
+            duration_in_seconds: one_year_duration + one_year_duration,
+            can_cast_vote: false,
+        };
+
         router
             .execute_contract(
                 Addr::unchecked(USER),
                 vault_c_addr.clone(),
                 &ExecuteMsg::RequestLiquidity {
-                    option: LiquidityRequestMsg::FixedTermRental {
-                        requested_amount: Coin {
-                            denom: IBC_DENOM_1.to_string(),
-                            amount,
-                        },
-                        duration_in_seconds: one_year_duration + one_year_duration,
-                        can_cast_vote: false,
-                    },
+                    option: option.clone(),
                 },
                 &[],
             )
@@ -766,7 +770,7 @@ mod tests {
         // Step 4
         // Accept liquidity request option by LENDER
         // ------------------------------------------------------------------------------
-        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest {};
+        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest { option };
         router
             .execute_contract(
                 Addr::unchecked(LENDER),
@@ -1421,7 +1425,7 @@ mod tests {
             .execute_contract(
                 Addr::unchecked(USER),
                 vault_c_addr.clone(),
-                &ExecuteMsg::AcceptLiquidityRequest {},
+                &ExecuteMsg::AcceptLiquidityRequest { option },
                 &[requested_amount],
             )
             .unwrap();
@@ -1438,6 +1442,84 @@ mod tests {
                 vault_c_addr.clone(),
                 &close_liquidity_request_msg,
                 &[],
+            )
+            .unwrap_err();
+    }
+
+    #[test]
+    fn test_mev_guard_for_accept_liquidity_request() {
+        // Step 1
+        // Get vault instance
+        // ------------------------------------------------------------------------------
+        let mut router = mock_app();
+        let (vault_c_addr, _from_code_id) = instantiate_vault(&mut router);
+
+        // Step 2
+        // Delegate to VALIDATOR_ONE_ADDRESS
+        // ------------------------------------------------------------------------------
+        let amount = Uint128::new(1_000_000);
+        let delegate_msg = ExecuteMsg::Delegate {
+            validator: VALIDATOR_ONE_ADDRESS.to_string(),
+            amount,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &delegate_msg,
+                &[Coin {
+                    denom: STAKING_DENOM.into(),
+                    amount,
+                }],
+            )
+            .unwrap();
+
+        // Step 3
+        // Create a valid liquidity request
+        // ------------------------------------------------------------------------------
+        let duration_in_seconds = 60u64;
+        let option = LiquidityRequestMsg::FixedTermLoan {
+            requested_amount: Coin {
+                denom: IBC_DENOM_1.to_string(),
+                amount,
+            },
+            interest_amount: Uint128::zero(),
+            collateral_amount: amount,
+            duration_in_seconds,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &ExecuteMsg::RequestLiquidity {
+                    option: option.clone(),
+                },
+                &[],
+            )
+            .unwrap();
+
+        // Step 3
+        // Test error case ContractError::OptionNotExactMatch {}
+        // When trying to accept the option by passing non matching terms to the contract
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &ExecuteMsg::AcceptLiquidityRequest {
+                    option: LiquidityRequestMsg::FixedTermRental {
+                        requested_amount: Coin {
+                            denom: IBC_DENOM_1.to_string(),
+                            amount,
+                        },
+                        duration_in_seconds: 60u64,
+                        can_cast_vote: false,
+                    },
+                },
+                &[Coin {
+                    denom: IBC_DENOM_1.to_string(),
+                    amount,
+                }],
             )
             .unwrap_err();
     }
@@ -1474,12 +1556,20 @@ mod tests {
         // Test error case ContractError::Unauthorized {}
         // When there is no open liquidity request on the vault
         // ------------------------------------------------------------------------------
-        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest {};
         router
             .execute_contract(
                 Addr::unchecked(USER),
                 vault_c_addr.clone(),
-                &accept_liquidity_request_msg,
+                &ExecuteMsg::AcceptLiquidityRequest {
+                    option: LiquidityRequestMsg::FixedTermRental {
+                        requested_amount: Coin {
+                            denom: IBC_DENOM_1.to_string(),
+                            amount,
+                        },
+                        duration_in_seconds: 60u64,
+                        can_cast_vote: false,
+                    },
+                },
                 &[],
             )
             .unwrap_err();
@@ -1516,7 +1606,9 @@ mod tests {
             .execute_contract(
                 Addr::unchecked(USER),
                 vault_c_addr.clone(),
-                &accept_liquidity_request_msg,
+                &ExecuteMsg::AcceptLiquidityRequest {
+                    option: option.clone(),
+                },
                 &[],
             )
             .unwrap_err();
@@ -1528,7 +1620,9 @@ mod tests {
             .execute_contract(
                 Addr::unchecked(USER),
                 vault_c_addr.clone(),
-                &accept_liquidity_request_msg,
+                &ExecuteMsg::AcceptLiquidityRequest {
+                    option: option.clone(),
+                },
                 &[Coin {
                     denom: IBC_DENOM_1.to_string(),
                     amount,
@@ -1557,7 +1651,7 @@ mod tests {
                     already_claimed: Uint128::zero(),
                     processing_liquidation: false
                 }),
-                msg: option
+                msg: option.clone()
             })
         );
 
@@ -1569,7 +1663,7 @@ mod tests {
             .execute_contract(
                 Addr::unchecked(USER),
                 vault_c_addr.clone(),
-                &accept_liquidity_request_msg,
+                &ExecuteMsg::AcceptLiquidityRequest { option },
                 &[Coin {
                     denom: STAKING_DENOM.into(),
                     amount,
@@ -1650,7 +1744,9 @@ mod tests {
         // Test error case ContractError::InvalidInputAmount {}
         // by sending the wrong requested amount
         // ------------------------------------------------------------------------------
-        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest {};
+        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest {
+            option: option.clone(),
+        };
         router
             .execute_contract(
                 Addr::unchecked(USER),
@@ -1787,7 +1883,9 @@ mod tests {
         // Test error case ContractError::InvalidInputAmount {}
         // by sending the wrong requested amount
         // ------------------------------------------------------------------------------
-        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest {};
+        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest {
+            option: option.clone(),
+        };
         router
             .execute_contract(
                 Addr::unchecked(USER),
@@ -2032,7 +2130,9 @@ mod tests {
         // Step 4
         // Accept the option
         // ------------------------------------------------------------------------------
-        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest {};
+        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest {
+            option: option.clone(),
+        };
         router
             .execute_contract(
                 Addr::unchecked(USER),
@@ -2215,7 +2315,9 @@ mod tests {
         // Step 4
         // Accept the option
         // ------------------------------------------------------------------------------
-        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest {};
+        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest {
+            option: option.clone(),
+        };
         router
             .execute_contract(
                 Addr::unchecked(USER),
@@ -2432,7 +2534,7 @@ mod tests {
         // Step 6
         // Accept the open liquidity request
         // ------------------------------------------------------------------------------
-        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest {};
+        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest { option };
         router
             .execute_contract(
                 Addr::unchecked(USER),
@@ -2607,7 +2709,7 @@ mod tests {
         // Step 6
         // Accept the open liquidity request
         // ------------------------------------------------------------------------------
-        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest {};
+        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest { option };
         router
             .execute_contract(
                 Addr::unchecked(USER),
@@ -2846,7 +2948,7 @@ mod tests {
         // Step 6
         // Accept the fixed term loan
         // ------------------------------------------------------------------------------
-        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest {};
+        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest { option };
         router
             .execute_contract(
                 Addr::unchecked(USER),

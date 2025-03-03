@@ -89,9 +89,10 @@ pub fn execute(
             execute_close_pending_liquidity_request(deps)
         }
 
-        ExecuteMsg::AcceptLiquidityRequest {} => {
+        ExecuteMsg::AcceptLiquidityRequest { option } => {
             let action_type = ActionTypes::AcceptLiquidityRequest {};
             authorize(&deps, _info.sender.clone(), action_type)?;
+            helpers::ensure_option_is_exact_match(&deps, option)?;
             execute_accept_liquidity_request(deps, _env, &_info)
         }
 

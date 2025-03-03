@@ -17,7 +17,10 @@ pub fn ensure_validator_is_active(deps: &DepsMut, validator: &str) -> Result<(),
     Ok(())
 }
 
-pub fn ensure_lender_can_redelegate(deps: &DepsMut, src_validator: &str) -> Result<(), ContractError> {
+pub fn ensure_lender_can_redelegate(
+    deps: &DepsMut,
+    src_validator: &str,
+) -> Result<(), ContractError> {
     if deps.querier.query_validator(src_validator)?.is_some() {
         return Err(ContractError::LenderCannotRedelegateFromActiveValidator {
             validator: src_validator.to_string(),
@@ -497,4 +500,20 @@ pub fn map_liquidity_request_state(
             ),
         },
     )
+}
+
+pub fn ensure_option_is_exact_match(
+    deps: &DepsMut,
+    option: LiquidityRequestMsg,
+) -> Result<(), ContractError> {
+    let option_on_record = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?.unwrap().msg;
+
+    if option_on_record.ne(&option) {
+        return Err(ContractError::OptionNotExactMatch {
+            required: option,
+            on_record: option_on_record,
+        });
+    }
+
+    Ok(())
 }

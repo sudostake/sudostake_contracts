@@ -403,7 +403,7 @@ mod tests {
         // Accept the open liquidity request on vault_contract_addr
         // ------------------------------------------------------------------------------
         let accept_liquidity_request_msg =
-            vault_contract::msg::ExecuteMsg::AcceptLiquidityRequest {};
+            vault_contract::msg::ExecuteMsg::AcceptLiquidityRequest { option };
         app.execute_contract(
             Addr::unchecked(USER),
             Addr::unchecked(vault_contract_addr),

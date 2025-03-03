@@ -1,6 +1,8 @@
 use cosmwasm_std::{Coin, StdError, Uint128};
 use thiserror::Error;
 
+use crate::state::LiquidityRequestMsg;
+
 #[derive(Error, Debug)]
 pub enum ContractError {
     #[error("{0}")]
@@ -38,6 +40,12 @@ pub enum ContractError {
 
     #[error("Repay: {amount:?}, owed to the lender for the defaulted fixed term loan")]
     ClearOutstandingDebt { amount: Coin },
+
+    #[error("Option not exact match. Required: {required:?}, On Record: {on_record:?}")]
+    OptionNotExactMatch {
+        required: LiquidityRequestMsg,
+        on_record: LiquidityRequestMsg,
+    },
 
     #[error("Custom Error val: {val:?}")]
     CustomError { val: String },
