@@ -1,3 +1,4 @@
+pub mod types;
 pub mod authorisation;
 pub mod contract;
 mod error;

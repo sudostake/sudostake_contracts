@@ -1,7 +1,6 @@
+use crate::types::LiquidityRequestMsg;
 use cosmwasm_std::{Coin, StdError, Uint128};
 use thiserror::Error;
-
-use crate::state::LiquidityRequestMsg;
 
 #[derive(Error, Debug)]
 pub enum ContractError {

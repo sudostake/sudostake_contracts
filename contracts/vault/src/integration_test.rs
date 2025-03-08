@@ -5,9 +5,8 @@ mod tests {
             AllDelegationsResponse, ExecuteMsg, InfoResponse, InstantiateMsg, QueryMsg,
             StakingInfoResponse,
         },
-        state::{
-            ActiveOption, Config, LiquidityRequestMsg, LiquidityRequestState, INSTANTIATOR_ADDR,
-        },
+        state::INSTANTIATOR_ADDR,
+        types::{ActiveOption, Config, LiquidityRequestMsg, LiquidityRequestState},
     };
     use cosmwasm_std::{
         testing::mock_env, Addr, Coin, Decimal, Delegation, Empty, Uint128, Validator,
@@ -1638,7 +1637,7 @@ mod tests {
             info.liquidity_request,
             Some(ActiveOption {
                 lender: Some(Addr::unchecked(USER)),
-                state: Some(crate::state::LiquidityRequestState::FixedTermLoan {
+                state: Some(crate::types::LiquidityRequestState::FixedTermLoan {
                     requested_amount: Coin {
                         denom: IBC_DENOM_1.to_string(),
                         amount,

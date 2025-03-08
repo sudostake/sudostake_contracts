@@ -1,28 +1,9 @@
 use crate::{
-    state::{ActiveOption, CONFIG, OPEN_LIQUIDITY_REQUEST},
+    state::{CONFIG, OPEN_LIQUIDITY_REQUEST},
+    types::{ActionTypes, ActiveOption},
     ContractError,
 };
 use cosmwasm_std::{Addr, DepsMut};
-
-// True  = vault has an open liquidity request
-// False = vault does not have an open liquidity request
-type WithRequestLiquidity = bool;
-
-#[derive(PartialEq)]
-pub enum ActionTypes {
-    Delegate,
-    Redelegate,
-    Undelegate(WithRequestLiquidity),
-    RequestLiquidity(WithRequestLiquidity),
-    ClosePendingLiquidityRequest(WithRequestLiquidity),
-    AcceptLiquidityRequest,
-    ClaimDelegatorRewards,
-    LiquidateCollateral(WithRequestLiquidity),
-    RepayLoan(WithRequestLiquidity),
-    WithdrawBalance,
-    TransferOwnership,
-    Vote,
-}
 
 // Applies to owner of vault
 const OWNER_AUTHORIZATIONS: [ActionTypes; 11] = [

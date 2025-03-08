@@ -1,4 +1,4 @@
-use crate::state::{ActiveOption, Config, LiquidityRequestMsg};
+use crate::types::{ActiveOption, Config, CounterOfferOperator, LiquidityRequestMsg};
 use cosmwasm_std::{Coin, Delegation, Uint128, VoteOption};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -43,6 +43,29 @@ pub enum ExecuteMsg {
     /// Allows the vault owner to open a liquidity request option
     RequestLiquidity {
         option: LiquidityRequestMsg,
+    },
+
+    /// Allows a liquidity provider to propose a counter offer
+    /// for a pending liquidity request
+    OpenCounterOffer {
+        new_amount: Uint128,
+        for_option: LiquidityRequestMsg,
+    },
+
+    /// Allows a liquidity provider to update the terms of their counter offer
+    /// Either by increasing or decreasing the proposed amount
+    UpdateCounterOffer {
+        by_amount: Uint128,
+        operator: CounterOfferOperator,
+    },
+
+    /// Allows a liquidity provider to cancel their counter offer
+    CancelCounterOffer {},
+
+    /// Allows the vault owner to accept a counter offer by a liquidity provider
+    AcceptCounterOffer {
+        amount: Uint128,
+        proposed_by_address: String,
     },
 
     /// Allows the vault owner to close a liquidity request

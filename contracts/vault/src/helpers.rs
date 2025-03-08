@@ -1,5 +1,6 @@
 use crate::{
-    state::{ActiveOption, LiquidityRequestMsg, LiquidityRequestState, OPEN_LIQUIDITY_REQUEST},
+    state::OPEN_LIQUIDITY_REQUEST,
+    types::{ActiveOption, LiquidityRequestMsg, LiquidityRequestState},
     ContractError,
 };
 use cosmwasm_std::{

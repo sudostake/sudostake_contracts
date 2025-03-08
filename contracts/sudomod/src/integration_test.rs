@@ -380,7 +380,7 @@ mod tests {
         let duration_in_seconds = 60u64;
         let requested_amount = Uint128::new(100_000_000);
         let expected_liquidity_comission = Uint128::new(300_000);
-        let option = vault_contract::state::LiquidityRequestMsg::FixedTermLoan {
+        let option = vault_contract::types::LiquidityRequestMsg::FixedTermLoan {
             requested_amount: Coin {
                 denom: IBC_DENOM_1.to_string(),
                 amount: requested_amount,

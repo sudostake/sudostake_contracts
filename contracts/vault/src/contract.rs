@@ -1,12 +1,15 @@
-use crate::authorisation::{authorize, ActionTypes};
+use crate::authorisation::authorize;
 use crate::error::ContractError;
 use crate::helpers;
 use crate::msg::{
     AllDelegationsResponse, ExecuteMsg, InfoResponse, InstantiateMsg, QueryMsg, StakingInfoResponse,
 };
-use crate::state::{
-    ActiveOption, Config, LiquidityRequestMsg, LiquidityRequestState, CONFIG, CONTRACT_NAME,
-    CONTRACT_VERSION, INSTANTIATOR_ADDR, OPEN_LIQUIDITY_REQUEST, STAKE_LIQUIDATION_INTERVAL,
+use crate::{
+    state::{
+        CONFIG, CONTRACT_NAME, CONTRACT_VERSION, INSTANTIATOR_ADDR, OPEN_LIQUIDITY_REQUEST,
+        STAKE_LIQUIDATION_INTERVAL,
+    },
+    types::{ActionTypes, ActiveOption, Config, LiquidityRequestMsg, LiquidityRequestState},
 };
 use cosmwasm_std::{
     attr, entry_point, to_binary, Addr, Binary, Coin, Deps, DepsMut, Env, GovMsg, MessageInfo,
@@ -79,6 +82,35 @@ pub fn execute(
                 ActionTypes::RequestLiquidity(helpers::has_open_liquidity_request(&deps)?);
             authorize(&deps, _info.sender.clone(), action_type)?;
             execute_request_liquidity(deps, _env, option)
+        }
+
+        ExecuteMsg::OpenCounterOffer {
+            new_amount,
+            for_option,
+        } => {
+            // Respond
+            Ok(Response::new())
+        }
+
+        ExecuteMsg::UpdateCounterOffer {
+            by_amount,
+            operator,
+        } => {
+            // Respond
+            Ok(Response::new())
+        }
+
+        ExecuteMsg::CancelCounterOffer {} => {
+            // Respond
+            Ok(Response::new())
+        }
+
+        ExecuteMsg::AcceptCounterOffer {
+            amount,
+            proposed_by_address,
+        } => {
+            // Respond
+            Ok(Response::new())
         }
 
         ExecuteMsg::ClosePendingLiquidityRequest {} => {
