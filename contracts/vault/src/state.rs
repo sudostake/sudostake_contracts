@@ -15,4 +15,4 @@ pub const STAKE_LIQUIDATION_INTERVAL: u64 = 60 * 60 * 24 * 30;
 pub const CONFIG: Item<Config> = Item::new("CONFIG");
 
 // This stores the state for the active liquidity request option
-pub const OPEN_LIQUIDITY_REQUEST: Item<Option<ActiveOption>> = Item::new("OPEN_LIQUIDITY_REQUEST");
+pub const LIQUIDITY_REQUEST_STATE: Item<Option<ActiveOption>> = Item::new("LIQUIDITY_REQUEST_STATE");

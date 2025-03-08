@@ -1,21 +1,22 @@
 use crate::{
-    state::{CONFIG, OPEN_LIQUIDITY_REQUEST},
-    types::{ActionTypes, ActiveOption},
+    state::{CONFIG, LIQUIDITY_REQUEST_STATE},
+    types::{ActionTypes, ActiveOption, LiquidityRequestStatus},
     ContractError,
 };
 use cosmwasm_std::{Addr, DepsMut};
 
 // Applies to owner of vault
-const OWNER_AUTHORIZATIONS: [ActionTypes; 11] = [
+const OWNER_AUTHORIZATIONS: [ActionTypes; 12] = [
     ActionTypes::Delegate,
     ActionTypes::Redelegate,
-    ActionTypes::Undelegate(false),
-    ActionTypes::RequestLiquidity(false),
-    ActionTypes::ClosePendingLiquidityRequest(true),
+    ActionTypes::Undelegate(LiquidityRequestStatus::Closed),
+    ActionTypes::RequestLiquidity(LiquidityRequestStatus::Closed),
+    ActionTypes::AcceptCounterOffer(LiquidityRequestStatus::Pending),
+    ActionTypes::ClosePendingLiquidityRequest(LiquidityRequestStatus::Pending),
     ActionTypes::TransferOwnership,
-    ActionTypes::RepayLoan(true),
+    ActionTypes::RepayLoan(LiquidityRequestStatus::Active),
     ActionTypes::ClaimDelegatorRewards,
-    ActionTypes::LiquidateCollateral(true),
+    ActionTypes::LiquidateCollateral(LiquidityRequestStatus::Active),
     ActionTypes::WithdrawBalance,
     ActionTypes::Vote,
 ];
@@ -24,12 +25,17 @@ const OWNER_AUTHORIZATIONS: [ActionTypes; 11] = [
 const LENDER_AUTHORIZATIONS: [ActionTypes; 4] = [
     ActionTypes::Redelegate,
     ActionTypes::ClaimDelegatorRewards,
-    ActionTypes::LiquidateCollateral(true),
+    ActionTypes::LiquidateCollateral(LiquidityRequestStatus::Active),
     ActionTypes::Vote,
 ];
 
-// Applies to all users trying to lend to the open liquidity request option
-const OPEN_AUTHORIZATIONS: [ActionTypes; 1] = [ActionTypes::AcceptLiquidityRequest];
+// Applies to any user trying to lend to the pending liquidity request option
+const OPEN_AUTHORIZATIONS: [ActionTypes; 4] = [
+    ActionTypes::AcceptLiquidityRequest(LiquidityRequestStatus::Pending),
+    ActionTypes::OpenCounterOffer(LiquidityRequestStatus::Pending),
+    ActionTypes::UpdateCounterOffer(LiquidityRequestStatus::Pending),
+    ActionTypes::CancelCounterOffer(LiquidityRequestStatus::Pending),
+];
 
 pub fn authorize(
     deps: &DepsMut,
@@ -43,11 +49,10 @@ pub fn authorize(
     }
 
     // Check if the caller has lender authorizations on the vault
-    let liquidity_request = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?;
+    let liquidity_request = LIQUIDITY_REQUEST_STATE.load(deps.storage)?;
     if let Some(ActiveOption {
         lender: Some(lender),
-        state: Some(_state),
-        msg: _,
+        ..
     }) = liquidity_request
     {
         if caller.eq(&lender) && LENDER_AUTHORIZATIONS.contains(&action_type) {
@@ -56,16 +61,8 @@ pub fn authorize(
     }
 
     // Check if the caller has open authorizations on the vault
-    let liquidity_request = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?;
-    if let Some(ActiveOption {
-        lender: None,
-        state: None,
-        msg: _,
-    }) = liquidity_request
-    {
-        if OPEN_AUTHORIZATIONS.contains(&action_type) {
-            return Ok(());
-        }
+    if OPEN_AUTHORIZATIONS.contains(&action_type) {
+        return Ok(());
     }
 
     Err(ContractError::Unauthorized {})

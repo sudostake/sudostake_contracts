@@ -1,6 +1,6 @@
 use crate::{
-    state::OPEN_LIQUIDITY_REQUEST,
-    types::{ActiveOption, LiquidityRequestMsg, LiquidityRequestState},
+    state::LIQUIDITY_REQUEST_STATE,
+    types::{ActiveOption, LiquidityRequestMsg, LiquidityRequestState, LiquidityRequestStatus},
     ContractError,
 };
 use cosmwasm_std::{
@@ -184,8 +184,14 @@ pub fn get_bank_transfer_to_msg(recipient: &Addr, denom: &str, amount: Uint128) 
     .into()
 }
 
-pub fn has_open_liquidity_request(deps: &DepsMut) -> StdResult<bool> {
-    Ok(OPEN_LIQUIDITY_REQUEST.load(deps.storage)?.is_some())
+pub fn get_liquidity_request_status(deps: &DepsMut) -> StdResult<LiquidityRequestStatus> {
+    let liquidity_request = LIQUIDITY_REQUEST_STATE.load(deps.storage)?;
+    let status = match liquidity_request {
+        Some(ActiveOption { state: Some(_), .. }) => LiquidityRequestStatus::Active,
+        Some(ActiveOption { state: None, .. }) => LiquidityRequestStatus::Pending,
+        None => LiquidityRequestStatus::Closed,
+    };
+    Ok(status)
 }
 
 pub fn get_liquidity_comission(amount: Uint128) -> StdResult<Uint128> {
@@ -222,7 +228,7 @@ pub fn process_lender_claims(
 
             // Update the liquidity request state
             let updated_already_claimed = already_claimed + amount_to_send_to_lender;
-            OPEN_LIQUIDITY_REQUEST.update(deps.storage, |data| -> Result<_, ContractError> {
+            LIQUIDITY_REQUEST_STATE.update(deps.storage, |data| -> Result<_, ContractError> {
                 if updated_already_claimed.lt(&claimable_tokens) {
                     let mut option = data.unwrap();
                     option.state = Some(LiquidityRequestState::FixedInterestRental {
@@ -273,7 +279,7 @@ pub fn process_lender_claims(
             };
 
             // Update the liquidity request state
-            OPEN_LIQUIDITY_REQUEST.update(deps.storage, |data| -> Result<_, ContractError> {
+            LIQUIDITY_REQUEST_STATE.update(deps.storage, |data| -> Result<_, ContractError> {
                 if current_time < end_time {
                     let mut option = data.unwrap();
                     option.state = Some(LiquidityRequestState::FixedTermRental {
@@ -349,7 +355,7 @@ pub fn current_lender_can_cast_vote(deps: &DepsMut, env: &Env) -> Result<bool, C
         msg: _,
         lender: _,
         state: Some(liquidity_request_state),
-    }) = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?
+    }) = LIQUIDITY_REQUEST_STATE.load(deps.storage)?
     {
         match liquidity_request_state {
             LiquidityRequestState::FixedInterestRental {
@@ -403,7 +409,7 @@ pub fn outstanding_fixed_term_loan_debt(
                 last_liquidation_date: _,
                 processing_liquidation: _,
             }),
-    }) = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?
+    }) = LIQUIDITY_REQUEST_STATE.load(deps.storage)?
     {
         if env.block.time >= end_time {
             outstanding_debt = collateral_amount - already_claimed;
@@ -431,7 +437,7 @@ pub fn can_delegate_with_active_liquidity_request(
                 last_liquidation_date: _,
                 processing_liquidation: _,
             }),
-    }) = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?
+    }) = LIQUIDITY_REQUEST_STATE.load(deps.storage)?
     {
         if env.block.time >= end_time {
             return Err(ContractError::ClearOutstandingDebt {
@@ -451,7 +457,7 @@ pub fn map_liquidity_request_state(
     env: &Env,
 ) -> Result<(LiquidityRequestState, Coin), ContractError> {
     Ok(
-        match OPEN_LIQUIDITY_REQUEST.load(deps.storage)?.unwrap().msg {
+        match LIQUIDITY_REQUEST_STATE.load(deps.storage)?.unwrap().msg {
             LiquidityRequestMsg::FixedInterestRental {
                 requested_amount,
                 claimable_tokens,
@@ -507,7 +513,7 @@ pub fn ensure_option_is_exact_match(
     deps: &DepsMut,
     option: LiquidityRequestMsg,
 ) -> Result<(), ContractError> {
-    let option_on_record = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?.unwrap().msg;
+    let option_on_record = LIQUIDITY_REQUEST_STATE.load(deps.storage)?.unwrap().msg;
 
     if option_on_record.ne(&option) {
         return Err(ContractError::OptionNotExactMatch {

@@ -1306,6 +1306,8 @@ mod tests {
         );
     }
 
+    // TODO add integration tests for counter offer logic
+
     #[test]
     fn test_close_pending_liquidity_request() {
         // Step 1

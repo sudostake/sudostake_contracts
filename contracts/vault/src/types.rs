@@ -73,21 +73,28 @@ pub enum LiquidityRequestState {
     },
 }
 
-// True  = vault has an open liquidity request
-// False = vault does not have an open liquidity request
-type WithRequestLiquidity = bool;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LiquidityRequestStatus {
+    Pending,
+    Active,
+    Closed,
+}
 
 #[derive(PartialEq)]
 pub enum ActionTypes {
     Delegate,
     Redelegate,
-    Undelegate(WithRequestLiquidity),
-    RequestLiquidity(WithRequestLiquidity),
-    ClosePendingLiquidityRequest(WithRequestLiquidity),
-    AcceptLiquidityRequest,
+    Undelegate(LiquidityRequestStatus),
+    RequestLiquidity(LiquidityRequestStatus),
+    OpenCounterOffer(LiquidityRequestStatus),
+    UpdateCounterOffer(LiquidityRequestStatus),
+    CancelCounterOffer(LiquidityRequestStatus),
+    AcceptCounterOffer(LiquidityRequestStatus),
+    ClosePendingLiquidityRequest(LiquidityRequestStatus),
+    AcceptLiquidityRequest(LiquidityRequestStatus),
     ClaimDelegatorRewards,
-    LiquidateCollateral(WithRequestLiquidity),
-    RepayLoan(WithRequestLiquidity),
+    LiquidateCollateral(LiquidityRequestStatus),
+    RepayLoan(LiquidityRequestStatus),
     WithdrawBalance,
     TransferOwnership,
     Vote,

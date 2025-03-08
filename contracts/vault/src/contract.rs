@@ -6,7 +6,7 @@ use crate::msg::{
 };
 use crate::{
     state::{
-        CONFIG, CONTRACT_NAME, CONTRACT_VERSION, INSTANTIATOR_ADDR, OPEN_LIQUIDITY_REQUEST,
+        CONFIG, CONTRACT_NAME, CONTRACT_VERSION, INSTANTIATOR_ADDR, LIQUIDITY_REQUEST_STATE,
         STAKE_LIQUIDATION_INTERVAL,
     },
     types::{ActionTypes, ActiveOption, Config, LiquidityRequestMsg, LiquidityRequestState},
@@ -35,7 +35,7 @@ pub fn instantiate(
     cw2::set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
 
     // Save contract state
-    OPEN_LIQUIDITY_REQUEST.save(deps.storage, &None)?;
+    LIQUIDITY_REQUEST_STATE.save(deps.storage, &None)?;
     CONFIG.save(
         deps.storage,
         &Config {
@@ -72,14 +72,15 @@ pub fn execute(
         }
 
         ExecuteMsg::Undelegate { validator, amount } => {
-            let action_type = ActionTypes::Undelegate(helpers::has_open_liquidity_request(&deps)?);
+            let action_type =
+                ActionTypes::Undelegate(helpers::get_liquidity_request_status(&deps)?);
             authorize(&deps, _info.sender.clone(), action_type)?;
             execute_undelegate(deps, _env, &_info, validator, amount)
         }
 
         ExecuteMsg::RequestLiquidity { option } => {
             let action_type =
-                ActionTypes::RequestLiquidity(helpers::has_open_liquidity_request(&deps)?);
+                ActionTypes::RequestLiquidity(helpers::get_liquidity_request_status(&deps)?);
             authorize(&deps, _info.sender.clone(), action_type)?;
             execute_request_liquidity(deps, _env, option)
         }
@@ -115,14 +116,15 @@ pub fn execute(
 
         ExecuteMsg::ClosePendingLiquidityRequest {} => {
             let action_type = ActionTypes::ClosePendingLiquidityRequest(
-                helpers::has_open_liquidity_request(&deps)?,
+                helpers::get_liquidity_request_status(&deps)?,
             );
             authorize(&deps, _info.sender.clone(), action_type)?;
             execute_close_pending_liquidity_request(deps)
         }
 
         ExecuteMsg::AcceptLiquidityRequest { option } => {
-            let action_type = ActionTypes::AcceptLiquidityRequest {};
+            let action_type =
+                ActionTypes::AcceptLiquidityRequest(helpers::get_liquidity_request_status(&deps)?);
             authorize(&deps, _info.sender.clone(), action_type)?;
             helpers::ensure_option_is_exact_match(&deps, option)?;
             execute_accept_liquidity_request(deps, _env, &_info)
@@ -135,14 +137,14 @@ pub fn execute(
         }
 
         ExecuteMsg::RepayLoan {} => {
-            let action_type = ActionTypes::RepayLoan(helpers::has_open_liquidity_request(&deps)?);
+            let action_type = ActionTypes::RepayLoan(helpers::get_liquidity_request_status(&deps)?);
             authorize(&deps, _info.sender.clone(), action_type)?;
             execute_repay_loan(deps, _env)
         }
 
         ExecuteMsg::LiquidateCollateral {} => {
             let action_type =
-                ActionTypes::LiquidateCollateral(helpers::has_open_liquidity_request(&deps)?);
+                ActionTypes::LiquidateCollateral(helpers::get_liquidity_request_status(&deps)?);
             authorize(&deps, _info.sender.clone(), action_type)?;
             execute_liquidate_collateral(deps, _env)
         }
@@ -193,7 +195,7 @@ pub fn execute_delegate(
         msg: _,
         lender: Some(lender),
         state: Some(state),
-    }) = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?
+    }) = LIQUIDITY_REQUEST_STATE.load(deps.storage)?
     {
         let (accumulated_rewards, distribute_msgs) =
             helpers::accumulated_rewards(&deps, &env, Some(vec![validator.clone()]))?;
@@ -252,7 +254,7 @@ pub fn execute_redelegate(
         msg: _,
         lender: Some(lender),
         state: Some(state),
-    }) = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?
+    }) = LIQUIDITY_REQUEST_STATE.load(deps.storage)?
     {
         let (accumulated_rewards, distribute_msgs) = helpers::accumulated_rewards(
             &deps,
@@ -375,7 +377,7 @@ pub fn execute_request_liquidity(
     };
 
     // Save liquidity request message
-    OPEN_LIQUIDITY_REQUEST.save(
+    LIQUIDITY_REQUEST_STATE.save(
         deps.storage,
         &Some(ActiveOption {
             lender: None,
@@ -385,7 +387,7 @@ pub fn execute_request_liquidity(
     )?;
 
     // Respond
-    Ok(Response::new().add_attributes(vec![attr("method", "open_liquidity_request")]))
+    Ok(Response::new().add_attributes(vec![attr("method", "LIQUIDITY_REQUEST_STATE")]))
 }
 
 pub fn execute_close_pending_liquidity_request(deps: DepsMut) -> Result<Response, ContractError> {
@@ -394,13 +396,13 @@ pub fn execute_close_pending_liquidity_request(deps: DepsMut) -> Result<Response
         msg: _,
         lender: Some(_lender),
         state: Some(_state),
-    }) = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?
+    }) = LIQUIDITY_REQUEST_STATE.load(deps.storage)?
     {
         return Err(ContractError::LiquidityRequestIsActive {});
     }
 
     // Clear the pending liquidity request
-    OPEN_LIQUIDITY_REQUEST.update(deps.storage, |mut _data| -> Result<_, ContractError> {
+    LIQUIDITY_REQUEST_STATE.update(deps.storage, |mut _data| -> Result<_, ContractError> {
         Ok(None)
     })?;
 
@@ -442,7 +444,7 @@ pub fn execute_accept_liquidity_request(
     }
 
     // Update state
-    OPEN_LIQUIDITY_REQUEST.update(deps.storage, |data| -> Result<_, ContractError> {
+    LIQUIDITY_REQUEST_STATE.update(deps.storage, |data| -> Result<_, ContractError> {
         let mut option = data.unwrap();
 
         // Update the state
@@ -484,7 +486,7 @@ pub fn execute_claim_delegator_rewards(deps: DepsMut, env: Env) -> Result<Respon
         msg: _,
         lender: Some(lender),
         state: Some(state),
-    }) = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?
+    }) = LIQUIDITY_REQUEST_STATE.load(deps.storage)?
     {
         if let Some(transfer_msgs) =
             helpers::process_lender_claims(deps, &env, state, lender, total_rewards_claimed)?
@@ -520,7 +522,7 @@ pub fn execute_repay_loan(deps: DepsMut, env: Env) -> Result<Response, ContractE
                 already_claimed: _,
                 processing_liquidation: false,
             }),
-    }) = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?
+    }) = LIQUIDITY_REQUEST_STATE.load(deps.storage)?
     {
         // Check if there is enough balance to repay requested_amount + interest_amount
         let repayment_amount = requested_amount.amount + interest_amount;
@@ -547,7 +549,7 @@ pub fn execute_repay_loan(deps: DepsMut, env: Env) -> Result<Response, ContractE
         ));
 
         // Close option as repayment has been processed successfully
-        OPEN_LIQUIDITY_REQUEST.update(deps.storage, |mut _data| -> Result<_, ContractError> {
+        LIQUIDITY_REQUEST_STATE.update(deps.storage, |mut _data| -> Result<_, ContractError> {
             Ok(None)
         })?;
     } else {
@@ -576,7 +578,7 @@ pub fn execute_liquidate_collateral(deps: DepsMut, env: Env) -> Result<Response,
                 last_liquidation_date,
                 processing_liquidation: _,
             }),
-    }) = OPEN_LIQUIDITY_REQUEST.load(deps.storage)?
+    }) = LIQUIDITY_REQUEST_STATE.load(deps.storage)?
     {
         // liquidation on fixed term loans can only happen on/after expiration date
         // TODO make this error message more descriptive
@@ -646,7 +648,7 @@ pub fn execute_liquidate_collateral(deps: DepsMut, env: Env) -> Result<Response,
         }
 
         // Update the liquidity request state
-        OPEN_LIQUIDITY_REQUEST.update(deps.storage, |data| -> Result<_, ContractError> {
+        LIQUIDITY_REQUEST_STATE.update(deps.storage, |data| -> Result<_, ContractError> {
             if claims_not_completed {
                 let mut option = data.unwrap();
                 option.state = Some(LiquidityRequestState::FixedTermLoan {
@@ -785,7 +787,7 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
 
 pub fn query_info(_deps: Deps) -> StdResult<InfoResponse> {
     let config = CONFIG.load(_deps.storage)?;
-    let liquidity_request = OPEN_LIQUIDITY_REQUEST.load(_deps.storage)?;
+    let liquidity_request = LIQUIDITY_REQUEST_STATE.load(_deps.storage)?;
     Ok(InfoResponse {
         config,
         liquidity_request,
