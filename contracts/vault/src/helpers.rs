@@ -1,11 +1,11 @@
 use crate::{
-    state::LIQUIDITY_REQUEST_STATE,
+    state::{COUNTER_OFFER_LIST, LIQUIDITY_REQUEST_STATE, MAX_COUNTER_OFFERS},
     types::{ActiveOption, LiquidityRequestMsg, LiquidityRequestState, LiquidityRequestStatus},
     ContractError,
 };
 use cosmwasm_std::{
     Addr, BankMsg, Coin, CosmosMsg, Delegation, Deps, DepsMut, DistributionMsg, Env, StakingMsg,
-    StdError, StdResult, Uint128,
+    StdError, StdResult, Storage, Uint128,
 };
 
 pub fn ensure_validator_is_active(deps: &DepsMut, validator: &str) -> Result<(), ContractError> {
@@ -509,6 +509,22 @@ pub fn map_liquidity_request_state(
     )
 }
 
+pub fn get_requested_amount(option: LiquidityRequestMsg) -> Coin {
+    match option {
+        LiquidityRequestMsg::FixedInterestRental {
+            requested_amount, ..
+        } => requested_amount,
+
+        LiquidityRequestMsg::FixedTermRental {
+            requested_amount, ..
+        } => requested_amount,
+
+        LiquidityRequestMsg::FixedTermLoan {
+            requested_amount, ..
+        } => requested_amount,
+    }
+}
+
 pub fn ensure_option_is_exact_match(
     deps: &DepsMut,
     option: LiquidityRequestMsg,
@@ -523,4 +539,28 @@ pub fn ensure_option_is_exact_match(
     }
 
     Ok(())
+}
+
+// This function retrieves the highest counteroffer or returns 0 if none exist.
+pub fn get_highest_offer(store: &mut dyn Storage) -> Uint128 {
+    COUNTER_OFFER_LIST
+        .range(store, None, None, cosmwasm_std::Order::Descending)
+        .next()
+        .and_then(|res| res.ok().map(|(_, v)| v))
+        .unwrap_or(Uint128::zero())
+}
+
+pub fn prune_lowest_offer(storage: &mut dyn Storage) -> StdResult<Option<(Addr, Uint128)>> {
+    // Get the lowest offer beyond the max allowed
+    let lowest_provider = COUNTER_OFFER_LIST
+        .range(storage, None, None, cosmwasm_std::Order::Descending)
+        .nth(MAX_COUNTER_OFFERS)
+        .and_then(|res| res.ok());
+
+    // Remove the lowest offer if found
+    if let Some((addr, _)) = &lowest_provider {
+        COUNTER_OFFER_LIST.remove(storage, addr.clone());
+    }
+
+    Ok(lowest_provider)
 }

@@ -21,6 +21,20 @@ mod tests {
     const VALIDATOR_ONE_ADDRESS: &str = "validator_one";
     const VALIDATOR_TWO_ADDRESS: &str = "validator_two";
 
+    const COUNTER_OFFER_PROPOSALS: [&str; 11] = [
+        "proposer_1",
+        "proposer_2",
+        "proposer_3",
+        "proposer_4",
+        "proposer_5",
+        "proposer_6",
+        "proposer_7",
+        "proposer_8",
+        "proposer_9",
+        "proposer_10",
+        "proposer_11",
+    ];
+
     fn mock_app() -> App {
         AppBuilder::new().build(|router, api, storage| {
             let env = mock_env();
@@ -44,26 +58,37 @@ mod tests {
                 )
                 .unwrap();
 
+            // Define the initial balance once to avoid redundant allocations
+            let initial_balances = vec![
+                Coin {
+                    denom: STAKING_DENOM.to_string(),
+                    amount: Uint128::zero(),
+                },
+                Coin {
+                    denom: IBC_DENOM_1.to_string(),
+                    amount: Uint128::from(SUPPLY),
+                },
+            ];
+
             // Set the initial balances for LENDER
             router
                 .bank
-                .init_balance(
-                    storage,
-                    &Addr::unchecked(LENDER),
-                    vec![
-                        Coin {
-                            denom: STAKING_DENOM.to_string(),
-                            amount: Uint128::zero(),
-                        },
-                        Coin {
-                            denom: IBC_DENOM_1.to_string(),
-                            amount: Uint128::from(SUPPLY),
-                        },
-                    ],
-                )
+                .init_balance(storage, &Addr::unchecked(LENDER), initial_balances.clone())
                 .unwrap();
 
-            // Setup staking module for the correct mock data.
+            // Initialize the balances for the counter offer proposers
+            for proposer in COUNTER_OFFER_PROPOSALS {
+                router
+                    .bank
+                    .init_balance(
+                        storage,
+                        &Addr::unchecked(proposer),
+                        initial_balances.clone(),
+                    )
+                    .unwrap();
+            }
+
+            // Setup staking module for the correct mock data
             router
                 .staking
                 .setup(
@@ -1306,7 +1331,88 @@ mod tests {
         );
     }
 
-    // TODO add integration tests for counter offer logic
+    #[test]
+    fn test_open_counter_offer() {
+        // Step 1
+        // Get vault instance
+        // ------------------------------------------------------------------------------
+        let mut router = mock_app();
+        let (vault_c_addr, _) = instantiate_vault(&mut router);
+
+        // Step 2
+        // Delegate to VALIDATOR_ONE_ADDRESS
+        // ------------------------------------------------------------------------------
+        let amount = Uint128::new(1_000_000);
+        let delegate_msg = ExecuteMsg::Delegate {
+            validator: VALIDATOR_ONE_ADDRESS.to_string(),
+            amount,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &delegate_msg,
+                &[Coin {
+                    denom: STAKING_DENOM.into(),
+                    amount,
+                }],
+            )
+            .unwrap();
+
+        // Step 3
+        // Create a valid liquidity request
+        // ------------------------------------------------------------------------------
+        let valid_liquidity_request_msg = LiquidityRequestMsg::FixedTermRental {
+            requested_amount: Coin {
+                denom: IBC_DENOM_1.to_string(),
+                amount,
+            },
+            duration_in_seconds: 60u64,
+            can_cast_vote: false,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &ExecuteMsg::RequestLiquidity {
+                    option: valid_liquidity_request_msg.clone(),
+                },
+                &[],
+            )
+            .unwrap();
+
+        // Test error case ContractError::Unauthorized {}
+        // When trying to call OpenCounterOffer when info.sender == owner
+
+        // Test error case ContractError::OptionNotExactMatch {}
+        // When counter_offer_proposer_1 tries to call OpenCounterOffer when the option
+        // sent does not the match the open liquidity request
+
+        // Successfully open a counter offer by sending in the correct option
+        // and funds to the open liquidity request from counter_offer_proposer_1
+
+        // Test error case ContractError::PendingCounterOfferAlreadyExist {}
+        // When counter_offer_proposer_1 tries to call OpenCounterOffer when there is already
+        // an offer they have created on the Counter_OFFER_LIST
+
+        // Test error case ContractError::InvalidInputAmount
+        // When counter_offer_proposer_2 tries to call OpenCounterOffer with an amount
+        // that is different from the requested amount
+
+        // Test error case ContractError::CounterOfferOutOfRange
+        // When counter_offer_proposer_2 tries to call OpenCounterOffer with an amount
+        // that is out of range of the allowed amount
+
+        // Successfully open a counter offer by sending in the correct option
+        // and funds to the open liquidity request from counter_offer_proposer_2
+        // also with an amount that is within the allowed range
+
+        // Successfully open 9 more counter offers by sending in the correct option
+        // Then verify that the lowest conter offer is removed from the list
+        // and the counter offer proposer is refunded their funds
+
+        // Verify that the correct values are stored in the CounterOfferList
+    }
 
     #[test]
     fn test_close_pending_liquidity_request() {
