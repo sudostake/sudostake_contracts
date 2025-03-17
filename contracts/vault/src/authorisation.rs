@@ -61,7 +61,7 @@ pub fn authorize(
     }
 
     // Check if the caller has open authorizations on the vault
-    if OPEN_AUTHORIZATIONS.contains(&action_type) {
+    if caller.ne(&config.owner) && OPEN_AUTHORIZATIONS.contains(&action_type) {
         return Ok(());
     }
 

@@ -1,4 +1,6 @@
-use crate::types::{ActiveOption, Config, CounterOfferOperator, LiquidityRequestMsg};
+use crate::types::{
+    ActiveOption, Config, CounterOfferOperator, CounterOfferProposal, LiquidityRequestMsg,
+};
 use cosmwasm_std::{Coin, Delegation, Uint128, VoteOption};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -119,8 +121,11 @@ pub enum QueryMsg {
     /// Returns StakingInfoResponse
     StakingInfo {},
 
-    /// Returns an array of all active delegations made from this vault
+    /// Returns AllDelegationsResponse
     AllDelegations {},
+
+    /// Returns CounterOfferListResponse
+    CounterOfferList {},
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -138,4 +143,9 @@ pub struct StakingInfoResponse {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct AllDelegationsResponse {
     pub data: Vec<Delegation>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct CounterOfferListResponse {
+    pub data: Vec<CounterOfferProposal>,
 }

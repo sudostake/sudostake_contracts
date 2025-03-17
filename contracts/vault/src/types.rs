@@ -47,6 +47,12 @@ pub enum CounterOfferOperator {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct CounterOfferProposal {
+    pub proposer: Addr,
+    pub amount: Uint128,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub enum LiquidityRequestState {
     FixedTermRental {
         requested_amount: Coin,

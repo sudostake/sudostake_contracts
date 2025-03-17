@@ -2,11 +2,13 @@
 mod tests {
     use crate::{
         msg::{
-            AllDelegationsResponse, ExecuteMsg, InfoResponse, InstantiateMsg, QueryMsg,
-            StakingInfoResponse,
+            AllDelegationsResponse, CounterOfferListResponse, ExecuteMsg, InfoResponse,
+            InstantiateMsg, QueryMsg, StakingInfoResponse,
         },
         state::INSTANTIATOR_ADDR,
-        types::{ActiveOption, Config, LiquidityRequestMsg, LiquidityRequestState},
+        types::{
+            ActiveOption, Config, CounterOfferProposal, LiquidityRequestMsg, LiquidityRequestState,
+        },
     };
     use cosmwasm_std::{
         testing::mock_env, Addr, Coin, Decimal, Delegation, Empty, Uint128, Validator,
@@ -20,6 +22,19 @@ mod tests {
     const SUPPLY: u128 = 500_000_000u128;
     const VALIDATOR_ONE_ADDRESS: &str = "validator_one";
     const VALIDATOR_TWO_ADDRESS: &str = "validator_two";
+    const COUNTER_OFFER_PROPOSERS: [&str; 11] = [
+        "proposer_1",
+        "proposer_2",
+        "proposer_3",
+        "proposer_4",
+        "proposer_5",
+        "proposer_6",
+        "proposer_7",
+        "proposer_8",
+        "proposer_9",
+        "proposer_10",
+        "proposer_11",
+    ];
 
     fn mock_app() -> App {
         AppBuilder::new().build(|router, api, storage| {
@@ -44,26 +59,37 @@ mod tests {
                 )
                 .unwrap();
 
+            // Define the initial balance once to avoid redundant allocations
+            let initial_balances = vec![
+                Coin {
+                    denom: STAKING_DENOM.to_string(),
+                    amount: Uint128::zero(),
+                },
+                Coin {
+                    denom: IBC_DENOM_1.to_string(),
+                    amount: Uint128::from(SUPPLY),
+                },
+            ];
+
             // Set the initial balances for LENDER
             router
                 .bank
-                .init_balance(
-                    storage,
-                    &Addr::unchecked(LENDER),
-                    vec![
-                        Coin {
-                            denom: STAKING_DENOM.to_string(),
-                            amount: Uint128::zero(),
-                        },
-                        Coin {
-                            denom: IBC_DENOM_1.to_string(),
-                            amount: Uint128::from(SUPPLY),
-                        },
-                    ],
-                )
+                .init_balance(storage, &Addr::unchecked(LENDER), initial_balances.clone())
                 .unwrap();
 
-            // Setup staking module for the correct mock data.
+            // Initialize the balances for the counter offer proposers
+            for proposer in COUNTER_OFFER_PROPOSERS {
+                router
+                    .bank
+                    .init_balance(
+                        storage,
+                        &Addr::unchecked(proposer),
+                        initial_balances.clone(),
+                    )
+                    .unwrap();
+            }
+
+            // Setup staking module for the correct mock data
             router
                 .staking
                 .setup(
@@ -160,9 +186,18 @@ mod tests {
 
         result
     }
+
     fn get_all_delegations(app: &mut App, contract_address: &Addr) -> AllDelegationsResponse {
         let msg = QueryMsg::AllDelegations {};
         let result: AllDelegationsResponse =
+            app.wrap().query_wasm_smart(contract_address, &msg).unwrap();
+
+        result
+    }
+
+    fn get_all_counter_offers(app: &mut App, contract_address: &Addr) -> CounterOfferListResponse {
+        let msg = QueryMsg::CounterOfferList {};
+        let result: CounterOfferListResponse =
             app.wrap().query_wasm_smart(contract_address, &msg).unwrap();
 
         result
@@ -382,7 +417,7 @@ mod tests {
         let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest { option };
         router
             .execute_contract(
-                Addr::unchecked(USER),
+                Addr::unchecked(LENDER),
                 vault_c_addr.clone(),
                 &accept_liquidity_request_msg,
                 &[Coin {
@@ -540,7 +575,7 @@ mod tests {
         let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest { option };
         router
             .execute_contract(
-                Addr::unchecked(USER),
+                Addr::unchecked(LENDER),
                 vault_c_addr.clone(),
                 &accept_liquidity_request_msg,
                 &[Coin {
@@ -578,12 +613,12 @@ mod tests {
         // Ensure that the claimed accumulated staking rewards went to the lender
         // ------------------------------------------------------------------------------
         let lender_balance =
-            bank_balance(&mut router, &Addr::unchecked(USER), STAKING_DENOM.into());
+            bank_balance(&mut router, &Addr::unchecked(LENDER), STAKING_DENOM.into());
         assert_eq!(
             lender_balance,
             Coin {
                 denom: STAKING_DENOM.to_string(),
-                amount: Uint128::new(SUPPLY) - (amount + amount) + expected_claimed_rewards
+                amount: expected_claimed_rewards
             }
         );
 
@@ -1306,7 +1341,331 @@ mod tests {
         );
     }
 
-    // TODO add integration tests for counter offer logic
+    #[test]
+    fn test_open_counter_offer() {
+        // Step 1
+        // Get vault instance
+        // ------------------------------------------------------------------------------
+        let mut router = mock_app();
+        let (vault_c_addr, _) = instantiate_vault(&mut router);
+
+        // Step 2
+        // Delegate to VALIDATOR_ONE_ADDRESS
+        // ------------------------------------------------------------------------------
+        let amount = Uint128::new(1_000_000);
+        let delegate_msg = ExecuteMsg::Delegate {
+            validator: VALIDATOR_ONE_ADDRESS.to_string(),
+            amount,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &delegate_msg,
+                &[Coin {
+                    denom: STAKING_DENOM.into(),
+                    amount,
+                }],
+            )
+            .unwrap();
+
+        // Step 3
+        // Create a valid liquidity request
+        // ------------------------------------------------------------------------------
+        let requested_amount = Uint128::new(1_000_000);
+        let valid_liquidity_request_msg = LiquidityRequestMsg::FixedTermRental {
+            requested_amount: Coin {
+                denom: IBC_DENOM_1.to_string(),
+                amount: requested_amount,
+            },
+            duration_in_seconds: 60u64,
+            can_cast_vote: false,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &ExecuteMsg::RequestLiquidity {
+                    option: valid_liquidity_request_msg.clone(),
+                },
+                &[],
+            )
+            .unwrap();
+
+        // Step 4
+        // Test error case ContractError::Unauthorized {}
+        // When the vault owner tries to call OpenCounterOffer
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &ExecuteMsg::OpenCounterOffer {
+                    new_amount: Uint128::new(900_000),
+                    for_option: valid_liquidity_request_msg.clone(),
+                },
+                &[Coin {
+                    denom: IBC_DENOM_1.into(),
+                    amount: Uint128::new(900_000),
+                }],
+            )
+            .unwrap_err();
+
+        // Step 5
+        // Test error case ContractError::OptionNotExactMatch {}
+        // When COUNTER_OFFER_PROPOSERS[0] tries to call OpenCounterOffer when the option
+        // sent does not the match the open liquidity request
+        // ------------------------------------------------------------------------------
+        let invalid_liquidity_request_msg = LiquidityRequestMsg::FixedTermRental {
+            requested_amount: Coin {
+                denom: IBC_DENOM_1.to_string(),
+                amount: requested_amount,
+            },
+            duration_in_seconds: 60u64,
+            can_cast_vote: true,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(COUNTER_OFFER_PROPOSERS[0]),
+                vault_c_addr.clone(),
+                &ExecuteMsg::OpenCounterOffer {
+                    new_amount: Uint128::new(900_000),
+                    for_option: invalid_liquidity_request_msg.clone(),
+                },
+                &[Coin {
+                    denom: IBC_DENOM_1.into(),
+                    amount: Uint128::new(900_000),
+                }],
+            )
+            .unwrap_err();
+
+        // Step 6
+        // Successfully open a counter offer by sending in the correct option
+        // and funds to the open liquidity request from COUNTER_OFFER_PROPOSERS[0]
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(COUNTER_OFFER_PROPOSERS[0]),
+                vault_c_addr.clone(),
+                &ExecuteMsg::OpenCounterOffer {
+                    new_amount: Uint128::new(900_000),
+                    for_option: valid_liquidity_request_msg.clone(),
+                },
+                &[Coin {
+                    denom: IBC_DENOM_1.into(),
+                    amount: Uint128::new(900_000),
+                }],
+            )
+            .unwrap();
+
+        // Step 7
+        // Test error case ContractError::PendingCounterOfferAlreadyExist {}
+        // When COUNTER_OFFER_PROPOSERS[0] tries to call OpenCounterOffer when there is already
+        // an offer they have created on the Counter_OFFER_LIST
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(COUNTER_OFFER_PROPOSERS[0]),
+                vault_c_addr.clone(),
+                &ExecuteMsg::OpenCounterOffer {
+                    new_amount: Uint128::new(900_001),
+                    for_option: valid_liquidity_request_msg.clone(),
+                },
+                &[Coin {
+                    denom: IBC_DENOM_1.into(),
+                    amount: Uint128::new(900_001),
+                }],
+            )
+            .unwrap_err();
+
+        // Step 8
+        // Test error case ContractError::InvalidInputAmount
+        // When COUNTER_OFFER_PROPOSERS[1] tries to call OpenCounterOffer by
+        // sending in funds different from the proposed amount
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(COUNTER_OFFER_PROPOSERS[1]),
+                vault_c_addr.clone(),
+                &ExecuteMsg::OpenCounterOffer {
+                    new_amount: Uint128::new(900_001),
+                    for_option: valid_liquidity_request_msg.clone(),
+                },
+                &[Coin {
+                    denom: IBC_DENOM_1.into(),
+                    amount: Uint128::new(900_000),
+                }],
+            )
+            .unwrap_err();
+
+        // Step 9
+        // Test error case ContractError::CounterOfferOutOfRange
+        // When COUNTER_OFFER_PROPOSERS[1] tries to call OpenCounterOffer with an amount
+        // that is less than what COUNTER_OFFER_PROPOSERS[0] has placed
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(COUNTER_OFFER_PROPOSERS[1]),
+                vault_c_addr.clone(),
+                &ExecuteMsg::OpenCounterOffer {
+                    new_amount: Uint128::new(899_999),
+                    for_option: valid_liquidity_request_msg.clone(),
+                },
+                &[Coin {
+                    denom: IBC_DENOM_1.into(),
+                    amount: Uint128::new(899_999),
+                }],
+            )
+            .unwrap_err();
+
+        // Step 10
+        // Test error case ContractError::CounterOfferOutOfRange
+        // When COUNTER_OFFER_PROPOSERS[1] tries to call OpenCounterOffer with an amount
+        // that is equal to what COUNTER_OFFER_PROPOSERS[0] has placed
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(COUNTER_OFFER_PROPOSERS[1]),
+                vault_c_addr.clone(),
+                &ExecuteMsg::OpenCounterOffer {
+                    new_amount: Uint128::new(900_000),
+                    for_option: valid_liquidity_request_msg.clone(),
+                },
+                &[Coin {
+                    denom: IBC_DENOM_1.into(),
+                    amount: Uint128::new(900_000),
+                }],
+            )
+            .unwrap_err();
+
+        // Step 11
+        // Test error case ContractError::CounterOfferOutOfRange
+        // When COUNTER_OFFER_PROPOSERS[1] tries to call OpenCounterOffer with an amount
+        // that is equal to the original requested_amount
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(COUNTER_OFFER_PROPOSERS[1]),
+                vault_c_addr.clone(),
+                &ExecuteMsg::OpenCounterOffer {
+                    new_amount: requested_amount,
+                    for_option: valid_liquidity_request_msg.clone(),
+                },
+                &[Coin {
+                    denom: IBC_DENOM_1.into(),
+                    amount: requested_amount,
+                }],
+            )
+            .unwrap_err();
+
+        // Step 12
+        // Test error case ContractError::CounterOfferOutOfRange
+        // When COUNTER_OFFER_PROPOSERS[1] tries to call OpenCounterOffer with an amount
+        // that is greater than the original requested_amount
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(COUNTER_OFFER_PROPOSERS[1]),
+                vault_c_addr.clone(),
+                &ExecuteMsg::OpenCounterOffer {
+                    new_amount: requested_amount,
+                    for_option: valid_liquidity_request_msg.clone(),
+                },
+                &[Coin {
+                    denom: IBC_DENOM_1.into(),
+                    amount: requested_amount + Uint128::new(1),
+                }],
+            )
+            .unwrap_err();
+
+        // Step 13
+        // Successfully open a counter offer by sending in the correct option
+        // and funds to the open liquidity request from COUNTER_OFFER_PROPOSERS_2
+        // also with an amount that is within the allowed range
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(COUNTER_OFFER_PROPOSERS[1]),
+                vault_c_addr.clone(),
+                &ExecuteMsg::OpenCounterOffer {
+                    new_amount: Uint128::new(900_001),
+                    for_option: valid_liquidity_request_msg.clone(),
+                },
+                &[Coin {
+                    denom: IBC_DENOM_1.into(),
+                    amount: Uint128::new(900_001),
+                }],
+            )
+            .unwrap();
+
+        // Step 14
+        // Successfully open 9 more counter offers by sending in the correct option
+        // starting from the third proposer
+        // ------------------------------------------------------------------------------
+        let mut offer_amount = Uint128::new(900_002);
+        let offer_increment_amount = Uint128::new(1);
+        for proposer in &COUNTER_OFFER_PROPOSERS[2..] {
+            router
+                .execute_contract(
+                    Addr::unchecked(*proposer),
+                    vault_c_addr.clone(),
+                    &ExecuteMsg::OpenCounterOffer {
+                        new_amount: offer_amount,
+                        for_option: valid_liquidity_request_msg.clone(),
+                    },
+                    &[Coin {
+                        denom: IBC_DENOM_1.into(),
+                        amount: offer_amount,
+                    }],
+                )
+                .unwrap();
+            // Increment amount for next proposer after executiing Open offer
+            offer_amount += offer_increment_amount;
+        }
+
+        // Step 15
+        // Verify that the expected list is what is returned in the query
+        // ------------------------------------------------------------------------------
+        let all_counter_offers = get_all_counter_offers(&mut router, &vault_c_addr);
+        let mut offer_amount = Uint128::new(900_010);
+        assert_eq!(
+            all_counter_offers,
+            CounterOfferListResponse {
+                data: COUNTER_OFFER_PROPOSERS[1..]
+                    .iter()
+                    .rev()
+                    .map(|proposer| {
+                        let offer = CounterOfferProposal {
+                            proposer: Addr::unchecked(*proposer),
+                            amount: offer_amount,
+                        };
+
+                        // Decrement amount for next proposer
+                        offer_amount -= offer_increment_amount;
+
+                        // Return current offer
+                        offer
+                    })
+                    .collect()
+            }
+        );
+
+        // Step 16
+        // Verify that the lowest counter offer proposer is refunded
+        // ------------------------------------------------------------------------------
+        let lowest_proposer_balance = bank_balance(
+            &mut router,
+            &Addr::unchecked(COUNTER_OFFER_PROPOSERS[0]),
+            IBC_DENOM_1.into(),
+        );
+        assert_eq!(
+            lowest_proposer_balance,
+            Coin {
+                denom: IBC_DENOM_1.to_string(),
+                amount: Uint128::new(SUPPLY)
+            }
+        );
+    }
 
     #[test]
     fn test_close_pending_liquidity_request() {
@@ -1424,7 +1783,7 @@ mod tests {
         // ------------------------------------------------------------------------------
         router
             .execute_contract(
-                Addr::unchecked(USER),
+                Addr::unchecked(LENDER),
                 vault_c_addr.clone(),
                 &ExecuteMsg::AcceptLiquidityRequest { option },
                 &[requested_amount],
@@ -1433,7 +1792,7 @@ mod tests {
 
         // Step 3
         // Test error case ContractError::LiquidityRequestIsActive {}
-        // When owner tries to call ClosePendingLiquidityRequest when the options
+        // When owner tries to call ClosePendingLiquidityRequest when the option
         // has already been accepted.
         // ------------------------------------------------------------------------------
         let close_liquidity_request_msg = ExecuteMsg::ClosePendingLiquidityRequest {};
@@ -1619,7 +1978,7 @@ mod tests {
         // ------------------------------------------------------------------------------
         router
             .execute_contract(
-                Addr::unchecked(USER),
+                Addr::unchecked(LENDER),
                 vault_c_addr.clone(),
                 &ExecuteMsg::AcceptLiquidityRequest {
                     option: option.clone(),
@@ -1638,7 +1997,7 @@ mod tests {
         assert_eq!(
             info.liquidity_request,
             Some(ActiveOption {
-                lender: Some(Addr::unchecked(USER)),
+                lender: Some(Addr::unchecked(LENDER)),
                 state: Some(crate::types::LiquidityRequestState::FixedTermLoan {
                     requested_amount: Coin {
                         denom: IBC_DENOM_1.to_string(),
@@ -1662,7 +2021,7 @@ mod tests {
         // ------------------------------------------------------------------------------
         router
             .execute_contract(
-                Addr::unchecked(USER),
+                Addr::unchecked(LENDER),
                 vault_c_addr.clone(),
                 &ExecuteMsg::AcceptLiquidityRequest { option },
                 &[Coin {
@@ -1762,7 +2121,7 @@ mod tests {
         // ------------------------------------------------------------------------------
         router
             .execute_contract(
-                Addr::unchecked(USER),
+                Addr::unchecked(LENDER),
                 vault_c_addr.clone(),
                 &accept_liquidity_request_msg,
                 &[Coin {
@@ -1780,7 +2139,7 @@ mod tests {
         assert_eq!(
             info.liquidity_request,
             Some(ActiveOption {
-                lender: Some(Addr::unchecked(USER)),
+                lender: Some(Addr::unchecked(LENDER)),
                 state: Some(LiquidityRequestState::FixedInterestRental {
                     requested_amount: Coin {
                         denom: IBC_DENOM_1.to_string(),
@@ -1800,7 +2159,7 @@ mod tests {
         // ------------------------------------------------------------------------------
         router
             .execute_contract(
-                Addr::unchecked(USER),
+                Addr::unchecked(LENDER),
                 vault_c_addr.clone(),
                 &accept_liquidity_request_msg,
                 &[Coin {
@@ -1906,7 +2265,7 @@ mod tests {
         // ------------------------------------------------------------------------------
         router
             .execute_contract(
-                Addr::unchecked(USER),
+                Addr::unchecked(LENDER),
                 vault_c_addr.clone(),
                 &accept_liquidity_request_msg,
                 &[Coin {
@@ -1936,7 +2295,7 @@ mod tests {
         assert_eq!(
             info.liquidity_request,
             Some(ActiveOption {
-                lender: Some(Addr::unchecked(USER)),
+                lender: Some(Addr::unchecked(LENDER)),
                 state: Some(LiquidityRequestState::FixedTermRental {
                     requested_amount: Coin {
                         denom: IBC_DENOM_1.to_string(),
@@ -1957,7 +2316,7 @@ mod tests {
         // ------------------------------------------------------------------------------
         router
             .execute_contract(
-                Addr::unchecked(USER),
+                Addr::unchecked(LENDER),
                 vault_c_addr.clone(),
                 &accept_liquidity_request_msg,
                 &[Coin {
@@ -2109,12 +2468,13 @@ mod tests {
         // Create a valid FixedInterestRental liquidity request
         // ------------------------------------------------------------------------------
         let requested_amount = Uint128::new(350_000);
+        let claimable_tokens = Uint128::new(350_000);
         let option = LiquidityRequestMsg::FixedInterestRental {
             requested_amount: Coin {
                 denom: IBC_DENOM_1.to_string(),
                 amount: requested_amount,
             },
-            claimable_tokens: requested_amount,
+            claimable_tokens,
             can_cast_vote: false,
         };
         router
@@ -2131,14 +2491,13 @@ mod tests {
         // Step 4
         // Accept the option
         // ------------------------------------------------------------------------------
-        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest {
-            option: option.clone(),
-        };
         router
             .execute_contract(
-                Addr::unchecked(USER),
+                Addr::unchecked(LENDER),
                 vault_c_addr.clone(),
-                &accept_liquidity_request_msg,
+                &ExecuteMsg::AcceptLiquidityRequest {
+                    option: option.clone(),
+                },
                 &[Coin {
                     denom: IBC_DENOM_1.to_string(),
                     amount: requested_amount,
@@ -2159,7 +2518,7 @@ mod tests {
         let claim_rewards_msg = ExecuteMsg::ClaimDelegatorRewards {};
         router
             .execute_contract(
-                Addr::unchecked(USER),
+                Addr::unchecked(LENDER),
                 vault_c_addr.clone(),
                 &claim_rewards_msg,
                 &[],
@@ -2172,7 +2531,7 @@ mod tests {
         // ------------------------------------------------------------------------------
         let vault_balance = bank_balance(&mut router, &vault_c_addr, STAKING_DENOM.into());
         let lender_balance =
-            bank_balance(&mut router, &Addr::unchecked(USER), STAKING_DENOM.into());
+            bank_balance(&mut router, &Addr::unchecked(LENDER), STAKING_DENOM.into());
         assert_eq!(
             vault_balance,
             Coin {
@@ -2184,7 +2543,7 @@ mod tests {
             lender_balance,
             Coin {
                 denom: STAKING_DENOM.to_string(),
-                amount: Uint128::new(SUPPLY) - delegated_amount + expected_claims_after_two_years
+                amount: expected_claims_after_two_years
             }
         );
 
@@ -2196,13 +2555,13 @@ mod tests {
         assert_eq!(
             info.liquidity_request,
             Some(ActiveOption {
-                lender: Some(Addr::unchecked(USER)),
+                lender: Some(Addr::unchecked(LENDER)),
                 state: Some(LiquidityRequestState::FixedInterestRental {
                     requested_amount: Coin {
                         denom: IBC_DENOM_1.to_string(),
                         amount: requested_amount,
                     },
-                    claimable_tokens: requested_amount,
+                    claimable_tokens,
                     already_claimed: expected_claims_after_two_years,
                     can_cast_vote: false,
                 }),
@@ -2222,7 +2581,7 @@ mod tests {
         let claim_rewards_msg = ExecuteMsg::ClaimDelegatorRewards {};
         router
             .execute_contract(
-                Addr::unchecked(USER),
+                Addr::unchecked(LENDER),
                 vault_c_addr.clone(),
                 &claim_rewards_msg,
                 &[],
@@ -2230,26 +2589,26 @@ mod tests {
             .unwrap();
 
         // Step 11
-        // Verify to ensure vault balance is
-        // (2 * expected_claims_after_two_years) - requsted_amount,
-        // and the lender's balance now has the requested_amount
+        // Verify to ensure vault balance for STAKING_DENOM equal
+        // (2 * expected_claims_after_two_years) - claimable_tokens,
+        // and the lender's balance for STAKING_DENOM equal claimable_tokens
         // ------------------------------------------------------------------------------
         let vault_balance = bank_balance(&mut router, &vault_c_addr, STAKING_DENOM.into());
         let lender_balance =
-            bank_balance(&mut router, &Addr::unchecked(USER), STAKING_DENOM.into());
+            bank_balance(&mut router, &Addr::unchecked(LENDER), STAKING_DENOM.into());
         assert_eq!(
             vault_balance,
             Coin {
                 denom: STAKING_DENOM.to_string(),
                 amount: (expected_claims_after_two_years + expected_claims_after_two_years)
-                    - requested_amount
+                    - claimable_tokens
             }
         );
         assert_eq!(
             lender_balance,
             Coin {
                 denom: STAKING_DENOM.to_string(),
-                amount: Uint128::new(SUPPLY) - delegated_amount + requested_amount
+                amount: claimable_tokens
             }
         );
 
@@ -2316,14 +2675,13 @@ mod tests {
         // Step 4
         // Accept the option
         // ------------------------------------------------------------------------------
-        let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest {
-            option: option.clone(),
-        };
         router
             .execute_contract(
-                Addr::unchecked(USER),
+                Addr::unchecked(LENDER),
                 vault_c_addr.clone(),
-                &accept_liquidity_request_msg,
+                &ExecuteMsg::AcceptLiquidityRequest {
+                    option: option.clone(),
+                },
                 &[Coin {
                     denom: IBC_DENOM_1.to_string(),
                     amount: requested_amount,
@@ -2347,7 +2705,7 @@ mod tests {
         let claim_rewards_msg = ExecuteMsg::ClaimDelegatorRewards {};
         router
             .execute_contract(
-                Addr::unchecked(USER),
+                Addr::unchecked(LENDER),
                 vault_c_addr.clone(),
                 &claim_rewards_msg,
                 &[],
@@ -2363,7 +2721,7 @@ mod tests {
         // ------------------------------------------------------------------------------
         let vault_balance = bank_balance(&mut router, &vault_c_addr, STAKING_DENOM.into());
         let lender_balance =
-            bank_balance(&mut router, &Addr::unchecked(USER), STAKING_DENOM.into());
+            bank_balance(&mut router, &Addr::unchecked(LENDER), STAKING_DENOM.into());
         assert_eq!(
             vault_balance,
             Coin {
@@ -2375,7 +2733,7 @@ mod tests {
             lender_balance,
             Coin {
                 denom: STAKING_DENOM.to_string(),
-                amount: Uint128::new(SUPPLY) - delegated_amount + expected_claims_after_two_years
+                amount: expected_claims_after_two_years
             }
         );
 
@@ -2387,7 +2745,7 @@ mod tests {
         assert_eq!(
             info.liquidity_request,
             Some(ActiveOption {
-                lender: Some(Addr::unchecked(USER)),
+                lender: Some(Addr::unchecked(LENDER)),
                 state: Some(LiquidityRequestState::FixedTermRental {
                     requested_amount: Coin {
                         denom: IBC_DENOM_1.to_string(),
@@ -2413,7 +2771,7 @@ mod tests {
         let claim_rewards_msg = ExecuteMsg::ClaimDelegatorRewards {};
         router
             .execute_contract(
-                Addr::unchecked(USER),
+                Addr::unchecked(LENDER),
                 vault_c_addr.clone(),
                 &claim_rewards_msg,
                 &[],
@@ -2427,7 +2785,7 @@ mod tests {
         // ------------------------------------------------------------------------------
         let vault_balance = bank_balance(&mut router, &vault_c_addr, STAKING_DENOM.into());
         let lender_balance =
-            bank_balance(&mut router, &Addr::unchecked(USER), STAKING_DENOM.into());
+            bank_balance(&mut router, &Addr::unchecked(LENDER), STAKING_DENOM.into());
         assert_eq!(
             vault_balance,
             Coin {
@@ -2440,7 +2798,7 @@ mod tests {
             lender_balance,
             Coin {
                 denom: STAKING_DENOM.to_string(),
-                amount: Uint128::new(SUPPLY) - delegated_amount + expected_rewards_after_duration
+                amount: expected_rewards_after_duration
             }
         );
 
@@ -2538,7 +2896,7 @@ mod tests {
         let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest { option };
         router
             .execute_contract(
-                Addr::unchecked(USER),
+                Addr::unchecked(LENDER),
                 vault_c_addr.clone(),
                 &accept_liquidity_request_msg,
                 &[Coin {
@@ -2589,11 +2947,10 @@ mod tests {
         assert_eq!(info.liquidity_request, None);
 
         // Step 10
-        // Verify that the lender got the amount paid. In this case, given the lender
-        // is still USER, then his balance for IBC_DENOM_1 should be equal SUPPLY  - liquidity_comission
-        //
-        // Also verify that the vault balance for IBC_DENOM_1 is zero as the balance
+        // Verify that the vault balance for IBC_DENOM_1 is zero as the balance
         // has been used to clear the debt
+        //
+        // Also verify that the LENDER balance is back to SUPPLY + interest_amount
         // ------------------------------------------------------------------------------
         let vault_balance = bank_balance(&mut router, &vault_c_addr, IBC_DENOM_1.into());
         assert_eq!(
@@ -2604,12 +2961,13 @@ mod tests {
             }
         );
 
-        let lender_balance = bank_balance(&mut router, &Addr::unchecked(USER), IBC_DENOM_1.into());
+        let lender_balance =
+            bank_balance(&mut router, &Addr::unchecked(LENDER), IBC_DENOM_1.into());
         assert_eq!(
             lender_balance,
             Coin {
                 denom: IBC_DENOM_1.to_string(),
-                amount: Uint128::new(SUPPLY) - liquidity_comission
+                amount: Uint128::new(SUPPLY) + interest_amount
             }
         );
     }
@@ -2713,7 +3071,7 @@ mod tests {
         let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest { option };
         router
             .execute_contract(
-                Addr::unchecked(USER),
+                Addr::unchecked(LENDER),
                 vault_c_addr.clone(),
                 &accept_liquidity_request_msg,
                 &[Coin {
@@ -2729,7 +3087,7 @@ mod tests {
         // ------------------------------------------------------------------------------
         router
             .execute_contract(
-                Addr::unchecked(USER),
+                Addr::unchecked(LENDER),
                 vault_c_addr.clone(),
                 &liquidation_msg,
                 &[],
@@ -2759,7 +3117,7 @@ mod tests {
         // ------------------------------------------------------------------------------
         router
             .execute_contract(
-                Addr::unchecked(USER),
+                Addr::unchecked(LENDER),
                 vault_c_addr.clone(),
                 &liquidation_msg,
                 &[],
@@ -2772,13 +3130,12 @@ mod tests {
         // ------------------------------------------------------------------------------
         let expected_claims_after_one_years = Uint128::new(200_000);
         let lender_balance =
-            bank_balance(&mut router, &Addr::unchecked(USER), STAKING_DENOM.into());
+            bank_balance(&mut router, &Addr::unchecked(LENDER), STAKING_DENOM.into());
         assert_eq!(
             lender_balance,
             Coin {
                 denom: STAKING_DENOM.to_string(),
-                amount: Uint128::new(SUPPLY) - delegated_amount - delegated_amount
-                    + expected_claims_after_one_years
+                amount: expected_claims_after_one_years
             }
         );
 
@@ -2835,14 +3192,12 @@ mod tests {
         // Verify that outstanding balance was send to lender
         // ------------------------------------------------------------------------------
         let lender_balance =
-            bank_balance(&mut router, &Addr::unchecked(USER), STAKING_DENOM.into());
+            bank_balance(&mut router, &Addr::unchecked(LENDER), STAKING_DENOM.into());
         assert_eq!(
             lender_balance,
             Coin {
                 denom: STAKING_DENOM.to_string(),
-                amount: Uint128::new(SUPPLY) - delegated_amount - delegated_amount
-                    + expected_claims_after_one_years
-                    + expected_outstanding_balance
+                amount: expected_claims_after_one_years + expected_outstanding_balance
             }
         );
 
@@ -2952,7 +3307,7 @@ mod tests {
         let accept_liquidity_request_msg = ExecuteMsg::AcceptLiquidityRequest { option };
         router
             .execute_contract(
-                Addr::unchecked(USER),
+                Addr::unchecked(LENDER),
                 vault_c_addr.clone(),
                 &accept_liquidity_request_msg,
                 &[Coin {

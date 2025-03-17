@@ -46,6 +46,18 @@ pub enum ContractError {
         on_record: LiquidityRequestMsg,
     },
 
+    #[error("Caller already has a pending counter offer")]
+    PendingCounterOfferAlreadyExist {},
+
+    #[error(
+        "Counter offer out of range, {new_amount:?} must be less than {requested_amount:?} and greater than {highest_offer:?}"
+    )]
+    CounterOfferOutOfRange {
+        requested_amount: Uint128,
+        new_amount: Uint128,
+        highest_offer: Uint128,
+    },
+
     #[error("Custom Error val: {val:?}")]
     CustomError { val: String },
     // Add any other custom errors you like here.

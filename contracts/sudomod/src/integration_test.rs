@@ -9,6 +9,7 @@ mod tests {
     use cw_multi_test::{App, AppBuilder, Contract, ContractWrapper, Executor, StakingInfo};
 
     const USER: &str = "user";
+    const LENDER: &str = "lender";
     const STAKING_DENOM: &str = "udenom";
     const IBC_DENOM_1: &str = "ibc/usdc_denom";
     const SUPPLY: u128 = 500_000_000u128;
@@ -28,6 +29,25 @@ mod tests {
                         Coin {
                             denom: STAKING_DENOM.to_string(),
                             amount: Uint128::from(SUPPLY),
+                        },
+                        Coin {
+                            denom: IBC_DENOM_1.to_string(),
+                            amount: Uint128::from(SUPPLY),
+                        },
+                    ],
+                )
+                .unwrap();
+
+            // Set the initial balances for LENDER
+            router
+                .bank
+                .init_balance(
+                    storage,
+                    &Addr::unchecked(LENDER),
+                    vec![
+                        Coin {
+                            denom: STAKING_DENOM.to_string(),
+                            amount: Uint128::zero(),
                         },
                         Coin {
                             denom: IBC_DENOM_1.to_string(),
@@ -405,7 +425,7 @@ mod tests {
         let accept_liquidity_request_msg =
             vault_contract::msg::ExecuteMsg::AcceptLiquidityRequest { option };
         app.execute_contract(
-            Addr::unchecked(USER),
+            Addr::unchecked(LENDER),
             Addr::unchecked(vault_contract_addr),
             &accept_liquidity_request_msg,
             &[Coin {

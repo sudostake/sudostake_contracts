@@ -2,14 +2,19 @@ use crate::authorisation::authorize;
 use crate::error::ContractError;
 use crate::helpers;
 use crate::msg::{
-    AllDelegationsResponse, ExecuteMsg, InfoResponse, InstantiateMsg, QueryMsg, StakingInfoResponse,
+    AllDelegationsResponse, CounterOfferListResponse, ExecuteMsg, InfoResponse, InstantiateMsg,
+    QueryMsg, StakingInfoResponse,
 };
+use crate::state::counter_offer_list;
 use crate::{
     state::{
         CONFIG, CONTRACT_NAME, CONTRACT_VERSION, INSTANTIATOR_ADDR, LIQUIDITY_REQUEST_STATE,
         STAKE_LIQUIDATION_INTERVAL,
     },
-    types::{ActionTypes, ActiveOption, Config, LiquidityRequestMsg, LiquidityRequestState},
+    types::{
+        ActionTypes, ActiveOption, Config, CounterOfferProposal, LiquidityRequestMsg,
+        LiquidityRequestState,
+    },
 };
 use cosmwasm_std::{
     attr, entry_point, to_binary, Addr, Binary, Coin, Deps, DepsMut, Env, GovMsg, MessageInfo,
@@ -89,8 +94,10 @@ pub fn execute(
             new_amount,
             for_option,
         } => {
-            // Respond
-            Ok(Response::new())
+            let action_type =
+                ActionTypes::OpenCounterOffer(helpers::get_liquidity_request_status(&deps)?);
+            authorize(&deps, _info.sender.clone(), action_type)?;
+            execute_open_counter_offer(deps, _env, &_info, new_amount, for_option)
         }
 
         ExecuteMsg::UpdateCounterOffer {
@@ -388,6 +395,62 @@ pub fn execute_request_liquidity(
 
     // Respond
     Ok(Response::new().add_attributes(vec![attr("method", "LIQUIDITY_REQUEST_STATE")]))
+}
+
+pub fn execute_open_counter_offer(
+    deps: DepsMut,
+    _env: Env,
+    info: &MessageInfo,
+    new_amount: Uint128,
+    for_option: LiquidityRequestMsg,
+) -> Result<Response, ContractError> {
+    let mut response = Response::new();
+
+    // Ensure the option on record matches for_option
+    helpers::ensure_option_is_exact_match(&deps, for_option.clone())?;
+
+    // Ensure caller is not already on the COUNTER_OFFER_LIST
+    if counter_offer_list().has(deps.storage, info.sender.clone()) {
+        return Err(ContractError::PendingCounterOfferAlreadyExist {});
+    }
+
+    // Ensure caller is sending in the correct amount
+    // of funds for the proposed counter offer
+    let requested_amount = helpers::get_requested_amount(for_option.clone());
+    helpers::validate_exact_input_amount(&info.funds, new_amount, requested_amount.denom.clone())?;
+
+    // Ensure counter_offer is within the allowed range
+    let highest_offer = helpers::get_highest_offer(deps.storage);
+    if new_amount.ge(&requested_amount.amount) || new_amount.le(&highest_offer) {
+        return Err(ContractError::CounterOfferOutOfRange {
+            requested_amount: requested_amount.amount,
+            new_amount,
+            highest_offer,
+        });
+    }
+
+    // Add counter offer to the list of offers
+    counter_offer_list().save(
+        deps.storage,
+        info.sender.clone(),
+        &CounterOfferProposal {
+            proposer: info.sender.clone(),
+            amount: new_amount,
+        },
+    )?;
+
+    // If there is a removed offer, refund the proposer
+    let removed_offer = helpers::prune_lowest_offer(deps.storage)?;
+    if let Some(proposal) = removed_offer {
+        response = response.add_message(helpers::get_bank_transfer_to_msg(
+            &proposal.proposer,
+            &requested_amount.denom,
+            proposal.amount,
+        ));
+    }
+
+    // Respond
+    Ok(response.add_attributes(vec![attr("method", "open_counter_offer")]))
 }
 
 pub fn execute_close_pending_liquidity_request(deps: DepsMut) -> Result<Response, ContractError> {
@@ -782,6 +845,7 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::Info {} => to_binary(&query_info(deps)?),
         QueryMsg::StakingInfo {} => to_binary(&query_staking_info(deps, env)?),
         QueryMsg::AllDelegations {} => to_binary(&query_all_delegations(deps, env)?),
+        QueryMsg::CounterOfferList {} => to_binary(&query_all_counter_offers(deps)?),
     }
 }
 
@@ -806,4 +870,9 @@ pub fn query_staking_info(deps: Deps, env: Env) -> StdResult<StakingInfoResponse
 pub fn query_all_delegations(deps: Deps, env: Env) -> StdResult<AllDelegationsResponse> {
     let data = helpers::query_all_delegations(&deps, &env)?;
     Ok(AllDelegationsResponse { data })
+}
+
+pub fn query_all_counter_offers(deps: Deps) -> StdResult<CounterOfferListResponse> {
+    let data = helpers::query_all_counter_offers(deps)?;
+    Ok(CounterOfferListResponse { data })
 }

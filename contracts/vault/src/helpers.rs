@@ -1,11 +1,14 @@
 use crate::{
-    state::LIQUIDITY_REQUEST_STATE,
-    types::{ActiveOption, LiquidityRequestMsg, LiquidityRequestState, LiquidityRequestStatus},
+    state::{counter_offer_list, LIQUIDITY_REQUEST_STATE, MAX_COUNTER_OFFERS},
+    types::{
+        ActiveOption, CounterOfferProposal, LiquidityRequestMsg, LiquidityRequestState,
+        LiquidityRequestStatus,
+    },
     ContractError,
 };
 use cosmwasm_std::{
     Addr, BankMsg, Coin, CosmosMsg, Delegation, Deps, DepsMut, DistributionMsg, Env, StakingMsg,
-    StdError, StdResult, Uint128,
+    StdError, StdResult, Storage, Uint128,
 };
 
 pub fn ensure_validator_is_active(deps: &DepsMut, validator: &str) -> Result<(), ContractError> {
@@ -509,6 +512,22 @@ pub fn map_liquidity_request_state(
     )
 }
 
+pub fn get_requested_amount(option: LiquidityRequestMsg) -> Coin {
+    match option {
+        LiquidityRequestMsg::FixedInterestRental {
+            requested_amount, ..
+        } => requested_amount,
+
+        LiquidityRequestMsg::FixedTermRental {
+            requested_amount, ..
+        } => requested_amount,
+
+        LiquidityRequestMsg::FixedTermLoan {
+            requested_amount, ..
+        } => requested_amount,
+    }
+}
+
 pub fn ensure_option_is_exact_match(
     deps: &DepsMut,
     option: LiquidityRequestMsg,
@@ -523,4 +542,43 @@ pub fn ensure_option_is_exact_match(
     }
 
     Ok(())
+}
+
+pub fn get_highest_offer(store: &dyn Storage) -> Uint128 {
+    counter_offer_list()
+        .idx
+        .amount
+        .range(store, None, None, cosmwasm_std::Order::Descending)
+        .next()
+        .and_then(|res| res.ok().map(|(_, proposal)| proposal.amount))
+        .unwrap_or(Uint128::zero())
+}
+
+pub fn prune_lowest_offer(storage: &mut dyn Storage) -> StdResult<Option<CounterOfferProposal>> {
+    // Fetch the lowest counteroffer beyond the max allowed
+    let lowest_provider = counter_offer_list()
+        .idx
+        .amount
+        .range(storage, None, None, cosmwasm_std::Order::Descending)
+        .nth(MAX_COUNTER_OFFERS)
+        .transpose()?;
+
+    // If we have an offer to prune, remove it from storage
+    if let Some((_, proposal)) = &lowest_provider {
+        counter_offer_list().remove(storage, proposal.proposer.clone())?;
+    }
+
+    // Return the pruned offer (if any)
+    Ok(lowest_provider.map(|(_, proposal)| proposal))
+}
+
+pub fn query_all_counter_offers(deps: Deps) -> StdResult<Vec<CounterOfferProposal>> {
+    let counter_offers: StdResult<Vec<CounterOfferProposal>> = counter_offer_list()
+        .idx
+        .amount
+        .range(deps.storage, None, None, cosmwasm_std::Order::Descending)
+        .map(|res| res.map(|(_, proposal)| proposal))
+        .collect();
+
+    counter_offers
 }
