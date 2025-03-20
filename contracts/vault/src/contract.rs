@@ -6,6 +6,7 @@ use crate::msg::{
     QueryMsg, StakingInfoResponse,
 };
 use crate::state::counter_offer_list;
+use crate::types::CounterOfferOperator;
 use crate::{
     state::{
         CONFIG, CONTRACT_NAME, CONTRACT_VERSION, INSTANTIATOR_ADDR, LIQUIDITY_REQUEST_STATE,
@@ -18,7 +19,7 @@ use crate::{
 };
 use cosmwasm_std::{
     attr, entry_point, to_binary, Addr, Binary, Coin, Deps, DepsMut, Env, GovMsg, MessageInfo,
-    Response, StakingMsg, StdResult, Uint128, VoteOption,
+    Order, Response, StakingMsg, StdError, StdResult, Uint128, VoteOption,
 };
 
 #[entry_point]
@@ -57,14 +58,14 @@ pub fn instantiate(
 #[entry_point]
 pub fn execute(
     deps: DepsMut,
-    _env: Env,
+    env: Env,
     _info: MessageInfo,
     _msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match _msg {
         ExecuteMsg::Delegate { validator, amount } => {
             authorize(&deps, _info.sender.clone(), ActionTypes::Delegate {})?;
-            execute_delegate(deps, _env, &_info, validator, amount)
+            execute_delegate(deps, env, &_info, validator, amount)
         }
 
         ExecuteMsg::Redelegate {
@@ -73,21 +74,21 @@ pub fn execute(
             amount,
         } => {
             authorize(&deps, _info.sender.clone(), ActionTypes::Redelegate {})?;
-            execute_redelegate(deps, _env, &_info, src_validator, dst_validator, amount)
+            execute_redelegate(deps, env, &_info, src_validator, dst_validator, amount)
         }
 
         ExecuteMsg::Undelegate { validator, amount } => {
             let action_type =
                 ActionTypes::Undelegate(helpers::get_liquidity_request_status(&deps)?);
             authorize(&deps, _info.sender.clone(), action_type)?;
-            execute_undelegate(deps, _env, &_info, validator, amount)
+            execute_undelegate(deps, env, &_info, validator, amount)
         }
 
         ExecuteMsg::RequestLiquidity { option } => {
             let action_type =
                 ActionTypes::RequestLiquidity(helpers::get_liquidity_request_status(&deps)?);
             authorize(&deps, _info.sender.clone(), action_type)?;
-            execute_request_liquidity(deps, _env, option)
+            execute_request_liquidity(deps, env, option)
         }
 
         ExecuteMsg::OpenCounterOffer {
@@ -97,15 +98,17 @@ pub fn execute(
             let action_type =
                 ActionTypes::OpenCounterOffer(helpers::get_liquidity_request_status(&deps)?);
             authorize(&deps, _info.sender.clone(), action_type)?;
-            execute_open_counter_offer(deps, _env, &_info, new_amount, for_option)
+            execute_open_counter_offer(deps, env, &_info, new_amount, for_option)
         }
 
         ExecuteMsg::UpdateCounterOffer {
             by_amount,
             operator,
         } => {
-            // Respond
-            Ok(Response::new())
+            let action_type =
+                ActionTypes::UpdateCounterOffer(helpers::get_liquidity_request_status(&deps)?);
+            authorize(&deps, _info.sender.clone(), action_type)?;
+            execute_update_counter_offer(deps, &_info, by_amount, operator)
         }
 
         ExecuteMsg::CancelCounterOffer {} => {
@@ -134,26 +137,26 @@ pub fn execute(
                 ActionTypes::AcceptLiquidityRequest(helpers::get_liquidity_request_status(&deps)?);
             authorize(&deps, _info.sender.clone(), action_type)?;
             helpers::ensure_option_is_exact_match(&deps, option)?;
-            execute_accept_liquidity_request(deps, _env, &_info)
+            execute_accept_liquidity_request(deps, env, &_info)
         }
 
         ExecuteMsg::ClaimDelegatorRewards {} => {
             let action_type = ActionTypes::ClaimDelegatorRewards {};
             authorize(&deps, _info.sender.clone(), action_type)?;
-            execute_claim_delegator_rewards(deps, _env)
+            execute_claim_delegator_rewards(deps, env)
         }
 
         ExecuteMsg::RepayLoan {} => {
             let action_type = ActionTypes::RepayLoan(helpers::get_liquidity_request_status(&deps)?);
             authorize(&deps, _info.sender.clone(), action_type)?;
-            execute_repay_loan(deps, _env)
+            execute_repay_loan(deps, env)
         }
 
         ExecuteMsg::LiquidateCollateral {} => {
             let action_type =
                 ActionTypes::LiquidateCollateral(helpers::get_liquidity_request_status(&deps)?);
             authorize(&deps, _info.sender.clone(), action_type)?;
-            execute_liquidate_collateral(deps, _env)
+            execute_liquidate_collateral(deps, env)
         }
 
         ExecuteMsg::TransferOwnership { to_address } => {
@@ -167,12 +170,12 @@ pub fn execute(
 
         ExecuteMsg::Vote { proposal_id, vote } => {
             authorize(&deps, _info.sender.clone(), ActionTypes::Vote {})?;
-            execute_vote(deps, _env, &_info, proposal_id, vote)
+            execute_vote(deps, env, &_info, proposal_id, vote)
         }
 
         ExecuteMsg::WithdrawBalance { to_address, funds } => {
             authorize(&deps, _info.sender.clone(), ActionTypes::WithdrawBalance)?;
-            execute_withdraw_balance(deps, _env, to_address, funds)
+            execute_withdraw_balance(deps, env, to_address, funds)
         }
     }
 }
@@ -451,6 +454,76 @@ pub fn execute_open_counter_offer(
 
     // Respond
     Ok(response.add_attributes(vec![attr("method", "open_counter_offer")]))
+}
+
+pub fn execute_update_counter_offer(
+    deps: DepsMut,
+    info: &MessageInfo,
+    by_amount: Uint128,
+    operator: CounterOfferOperator,
+) -> Result<Response, ContractError> {
+    let mut response = Response::new();
+
+    // Load caller's current offer
+    let mut caller_current_offer = counter_offer_list().load(deps.storage, info.sender.clone())?;
+
+    // Apply the operation safely
+    caller_current_offer.amount = match operator {
+        CounterOfferOperator::Add {} => caller_current_offer
+            .amount
+            .checked_add(by_amount)
+            .map_err(|err| StdError::generic_err(err.to_string()))?,
+        CounterOfferOperator::Sub {} => caller_current_offer
+            .amount
+            .checked_sub(by_amount)
+            .map_err(|err| StdError::generic_err(err.to_string()))?,
+    };
+
+    // Find the highest counter offer (excluding the caller)
+    let highest_offer = counter_offer_list()
+        .idx
+        .amount
+        .range(deps.storage, None, None, Order::Descending)
+        .filter_map(Result::ok)
+        .find(|(addr, _)| *addr != caller_current_offer.proposer)
+        .map(|(_, proposal)| proposal.amount)
+        .unwrap_or(Uint128::zero());
+
+    // Handle fund validation or refund logic
+    if let Some(ActiveOption { msg, .. }) = LIQUIDITY_REQUEST_STATE.load(deps.storage)? {
+        let requested_amount = helpers::get_requested_amount(msg);
+        let denom = requested_amount.denom.clone();
+
+        // Ensure updated caller_current_offer is within the allowed range
+        let new_amount = caller_current_offer.amount;
+        if new_amount.ge(&requested_amount.amount) || new_amount.le(&highest_offer) {
+            return Err(ContractError::CounterOfferOutOfRange {
+                requested_amount: requested_amount.amount,
+                new_amount,
+                highest_offer,
+            });
+        }
+
+        match operator {
+            CounterOfferOperator::Add {} => {
+                helpers::validate_exact_input_amount(&info.funds, by_amount, denom)?;
+            }
+            CounterOfferOperator::Sub {} => {
+                let refund_msg = helpers::get_bank_transfer_to_msg(&info.sender, &denom, by_amount);
+                response = response.add_message(refund_msg);
+            }
+        }
+    }
+
+    // Save the updated counter offer
+    counter_offer_list().save(
+        deps.storage,
+        caller_current_offer.proposer.clone(),
+        &caller_current_offer,
+    )?;
+
+    // Return response with attributes
+    Ok(response.add_attribute("method", "update_counter_offer"))
 }
 
 pub fn execute_close_pending_liquidity_request(deps: DepsMut) -> Result<Response, ContractError> {
