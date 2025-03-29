@@ -7,7 +7,8 @@ mod tests {
         },
         state::INSTANTIATOR_ADDR,
         types::{
-            ActiveOption, Config, CounterOfferProposal, LiquidityRequestMsg, LiquidityRequestState,
+            ActiveOption, Config, CounterOfferOperator, CounterOfferProposal, LiquidityRequestMsg,
+            LiquidityRequestState,
         },
     };
     use cosmwasm_std::{
@@ -1663,6 +1664,304 @@ mod tests {
             Coin {
                 denom: IBC_DENOM_1.to_string(),
                 amount: Uint128::new(SUPPLY)
+            }
+        );
+    }
+
+    #[test]
+    fn test_update_counter_offer() {
+        // Step 1
+        // Get vault instance
+        // ------------------------------------------------------------------------------
+        let mut router = mock_app();
+        let (vault_c_addr, _) = instantiate_vault(&mut router);
+
+        // Step 2
+        // Delegate to VALIDATOR_ONE_ADDRESS
+        // ------------------------------------------------------------------------------
+        let amount = Uint128::new(1_000_000);
+        let delegate_msg = ExecuteMsg::Delegate {
+            validator: VALIDATOR_ONE_ADDRESS.to_string(),
+            amount,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &delegate_msg,
+                &[Coin {
+                    denom: STAKING_DENOM.into(),
+                    amount,
+                }],
+            )
+            .unwrap();
+
+        // Step 3
+        // Create a valid liquidity request
+        // ------------------------------------------------------------------------------
+        let requested_amount = Uint128::new(1_000_000);
+        let valid_liquidity_request_msg = LiquidityRequestMsg::FixedTermRental {
+            requested_amount: Coin {
+                denom: IBC_DENOM_1.to_string(),
+                amount: requested_amount,
+            },
+            duration_in_seconds: 60u64,
+            can_cast_vote: false,
+        };
+        router
+            .execute_contract(
+                Addr::unchecked(USER),
+                vault_c_addr.clone(),
+                &ExecuteMsg::RequestLiquidity {
+                    option: valid_liquidity_request_msg.clone(),
+                },
+                &[],
+            )
+            .unwrap();
+
+        // Step 4
+        // Successfully open a counter offer by sending in the correct option
+        // and funds to the open liquidity request from COUNTER_OFFER_PROPOSERS[0]
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(COUNTER_OFFER_PROPOSERS[0]),
+                vault_c_addr.clone(),
+                &ExecuteMsg::OpenCounterOffer {
+                    new_amount: Uint128::new(900_000),
+                    for_option: valid_liquidity_request_msg.clone(),
+                },
+                &[Coin {
+                    denom: IBC_DENOM_1.into(),
+                    amount: Uint128::new(900_000),
+                }],
+            )
+            .unwrap();
+
+        // Step 5
+        // Ensure checked_add and checked_sub correctly handle boundary conditions.
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(COUNTER_OFFER_PROPOSERS[0]),
+                vault_c_addr.clone(),
+                &ExecuteMsg::UpdateCounterOffer {
+                    by_amount: Uint128::MAX,
+                    operator: CounterOfferOperator::Add,
+                },
+                &[],
+            )
+            .unwrap_err();
+        router
+            .execute_contract(
+                Addr::unchecked(COUNTER_OFFER_PROPOSERS[0]),
+                vault_c_addr.clone(),
+                &ExecuteMsg::UpdateCounterOffer {
+                    by_amount: Uint128::new(900_001),
+                    operator: CounterOfferOperator::Sub,
+                },
+                &[],
+            )
+            .unwrap_err();
+
+        // Step 6
+        // Test error case ContractError::InvalidInputAmount
+        // When we try to update counter offer by sending in the wrong amount
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(COUNTER_OFFER_PROPOSERS[0]),
+                vault_c_addr.clone(),
+                &ExecuteMsg::UpdateCounterOffer {
+                    by_amount: Uint128::new(1),
+                    operator: CounterOfferOperator::Add,
+                },
+                &[],
+            )
+            .unwrap_err();
+
+        // Step 7
+        // Increase the offered_amount successfully as long as it is within range
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(COUNTER_OFFER_PROPOSERS[0]),
+                vault_c_addr.clone(),
+                &ExecuteMsg::UpdateCounterOffer {
+                    by_amount: Uint128::new(1),
+                    operator: CounterOfferOperator::Add,
+                },
+                &[Coin {
+                    denom: IBC_DENOM_1.into(),
+                    amount: Uint128::new(1),
+                }],
+            )
+            .unwrap();
+
+        // Step 8
+        // Decrease the offered_amount successfully as long as it is witin range
+        // and verify that the difference was refunded
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(COUNTER_OFFER_PROPOSERS[0]),
+                vault_c_addr.clone(),
+                &ExecuteMsg::UpdateCounterOffer {
+                    by_amount: Uint128::new(1),
+                    operator: CounterOfferOperator::Sub,
+                },
+                &[],
+            )
+            .unwrap();
+        assert_eq!(
+            bank_balance(
+                &mut router,
+                &Addr::unchecked(COUNTER_OFFER_PROPOSERS[0]),
+                IBC_DENOM_1.into(),
+            ),
+            Coin {
+                denom: IBC_DENOM_1.to_string(),
+                amount: Uint128::new(SUPPLY) - Uint128::new(900_000)
+            }
+        );
+
+        // Step 9
+        // Error updating counter offer when COUNTER_OFFER_PROPOSERS[1]
+        // is not already on the list
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(COUNTER_OFFER_PROPOSERS[1]),
+                vault_c_addr.clone(),
+                &ExecuteMsg::UpdateCounterOffer {
+                    by_amount: Uint128::new(1),
+                    operator: CounterOfferOperator::Add,
+                },
+                &[Coin {
+                    denom: IBC_DENOM_1.into(),
+                    amount: Uint128::new(1),
+                }],
+            )
+            .unwrap_err();
+
+        // Step 10
+        // Successfully open a counter offer by sending in the correct option
+        // and funds to the open liquidity request from COUNTER_OFFER_PROPOSERS[1]
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(COUNTER_OFFER_PROPOSERS[1]),
+                vault_c_addr.clone(),
+                &ExecuteMsg::OpenCounterOffer {
+                    new_amount: Uint128::new(900_002),
+                    for_option: valid_liquidity_request_msg.clone(),
+                },
+                &[Coin {
+                    denom: IBC_DENOM_1.into(),
+                    amount: Uint128::new(900_002),
+                }],
+            )
+            .unwrap();
+
+        // Step 11
+        // Test error case ContractError::CounterOfferOutOfRange
+        // When trying to update COUNTER_OFFER_PROPOSERS[0] offer with an ADD operation,
+        // in a way that still does not make it the best offer
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(COUNTER_OFFER_PROPOSERS[0]),
+                vault_c_addr.clone(),
+                &ExecuteMsg::UpdateCounterOffer {
+                    by_amount: Uint128::new(1),
+                    operator: CounterOfferOperator::Add,
+                },
+                &[Coin {
+                    denom: IBC_DENOM_1.into(),
+                    amount: Uint128::new(1),
+                }],
+            )
+            .unwrap_err();
+
+        // Step 12
+        // Test error case ContractError::CounterOfferOutOfRange
+        // When trying to update COUNTER_OFFER_PROPOSERS[1] offer with an SUB operation,
+        // in a way that tries to downgrade it from best offer
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(COUNTER_OFFER_PROPOSERS[1]),
+                vault_c_addr.clone(),
+                &ExecuteMsg::UpdateCounterOffer {
+                    by_amount: Uint128::new(2),
+                    operator: CounterOfferOperator::Sub,
+                },
+                &[],
+            )
+            .unwrap_err();
+
+        // Step 13
+        // Successfully update COUNTER_OFFER_PROPOSERS[0]
+        // offer to make it the new best offer
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(COUNTER_OFFER_PROPOSERS[0]),
+                vault_c_addr.clone(),
+                &ExecuteMsg::UpdateCounterOffer {
+                    by_amount: Uint128::new(5),
+                    operator: CounterOfferOperator::Add,
+                },
+                &[Coin {
+                    denom: IBC_DENOM_1.into(),
+                    amount: Uint128::new(5),
+                }],
+            )
+            .unwrap();
+
+        // Verify that the counter offer order has changed with COUNTER_OFFER_PROPOSERS[0]
+        // now the best offer
+        let all_counter_offers = get_all_counter_offers(&mut router, &vault_c_addr);
+        assert_eq!(
+            all_counter_offers,
+            CounterOfferListResponse {
+                data: vec![
+                    CounterOfferProposal {
+                        proposer: Addr::unchecked(COUNTER_OFFER_PROPOSERS[0]),
+                        amount: Uint128::new(900_005),
+                    },
+                    CounterOfferProposal {
+                        proposer: Addr::unchecked(COUNTER_OFFER_PROPOSERS[1]),
+                        amount: Uint128::new(900_002),
+                    }
+                ]
+            }
+        );
+
+        // Step 14
+        // Verify that we can still operate on the best offer as
+        // long as it remains the best offer
+        // ------------------------------------------------------------------------------
+        router
+            .execute_contract(
+                Addr::unchecked(COUNTER_OFFER_PROPOSERS[0]),
+                vault_c_addr.clone(),
+                &ExecuteMsg::UpdateCounterOffer {
+                    by_amount: Uint128::new(2),
+                    operator: CounterOfferOperator::Sub,
+                },
+                &[],
+            )
+            .unwrap();
+        assert_eq!(
+            bank_balance(
+                &mut router,
+                &Addr::unchecked(COUNTER_OFFER_PROPOSERS[0]),
+                IBC_DENOM_1.into(),
+            ),
+            Coin {
+                denom: IBC_DENOM_1.to_string(),
+                amount: Uint128::new(SUPPLY) - Uint128::new(900_003)
             }
         );
     }
